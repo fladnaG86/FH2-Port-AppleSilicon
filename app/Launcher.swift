@@ -1,15 +1,83 @@
 // FH2 Port launcher: installs the layer into a CrossOver bottle and starts the
 // wrapper there. First launch (or launch with the Option key held) asks for the
-// bottle and the folder that holds azimuth.exe; later launches go straight to
-// the game. The layer is reinstalled only when the bundled DLLs differ from the
-// installed ones. The wrapper's own files are never modified.
+// bottle, the CrossOver installation and the folder that holds azimuth.exe;
+// later launches go straight to the game. The bottle folder comes from
+// CrossOver's own "BottleDir" preference. The layer is reinstalled only when the
+// bundled DLLs differ from the installed ones. The wrapper's own files are never
+// modified.
 
 import AppKit
 import CryptoKit
 
-let crossover = URL(fileURLWithPath: "/Applications/CrossOver.app")
-let bottlesDir = FileManager.default.homeDirectoryForCurrentUser
+let defaultBottlesDir = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Application Support/CrossOver/Bottles")
+
+/// Folder CrossOver itself uses for user bottles: its macOS preference
+/// "BottleDir", else the standard location.
+func bottleRoot() -> URL {
+    if let p = UserDefaults(suiteName: "com.codeweavers.CrossOver")?.string(forKey: "BottleDir"), !p.isEmpty {
+        return URL(fileURLWithPath: p)
+    }
+    return defaultBottlesDir
+}
+
+struct CrossOverInstall {
+    let app: URL            // /Applications/CrossOver Preview.app
+    let title: String       // "CrossOver Preview 20261015"
+    let version: String     // CFBundleShortVersionString
+    let d3dmetal: String    // "4.0b3", "" when the installation has none
+}
+
+/// The first four integers in `s`, missing ones as 0: "4.0b3" -> [4,0,3,0].
+func versionParts(_ s: String) -> [Int] {
+    var parts: [Int] = []
+    var digits = ""
+    for ch in s {
+        if ch.isNumber {
+            digits.append(ch)
+        } else if !digits.isEmpty {
+            parts.append(Int(digits) ?? 0)
+            digits = ""
+            if parts.count == 4 { break }
+        }
+    }
+    if parts.count < 4, !digits.isEmpty { parts.append(Int(digits) ?? 0) }
+    while parts.count < 4 { parts.append(0) }
+    return parts
+}
+
+/// CrossOver apps in /Applications, ranked: D3DMetal version descending, then
+/// CrossOver version descending, then path ascending.
+func crossOverInstalls() -> [CrossOverInstall] {
+    let fm = FileManager.default
+    let appsDir = URL(fileURLWithPath: "/Applications")
+    var found: [CrossOverInstall] = []
+    for name in (try? fm.contentsOfDirectory(atPath: appsDir.path)) ?? [] where name.hasSuffix(".app") {
+        let app = appsDir.appendingPathComponent(name)
+        let support = app.appendingPathComponent("Contents/SharedSupport/CrossOver")
+        guard fm.fileExists(atPath: support.appendingPathComponent("bin/wine").path),
+              let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")),
+              info["CFBundleIdentifier"] as? String == "com.codeweavers.CrossOver" else { continue }
+        let version = info["CFBundleShortVersionString"] as? String ?? ""
+        var d3dmetal = ""
+        for rel in ["lib64/apple_gptk/external/D3DMetal.framework/Resources/Info.plist",
+                    "lib/apple_gptk/external/D3DMetal.framework/Resources/Info.plist"] {
+            if let p = NSDictionary(contentsOf: support.appendingPathComponent(rel)),
+               let v = p["CFBundleShortVersionString"] as? String { d3dmetal = v; break }
+        }
+        found.append(CrossOverInstall(app: app,
+                                      title: "\(name.dropLast(4)) \(version)",
+                                      version: version,
+                                      d3dmetal: d3dmetal))
+    }
+    return found.sorted { a, b in
+        let da = versionParts(a.d3dmetal), db = versionParts(b.d3dmetal)
+        if da != db { return db.lexicographicallyPrecedes(da) }
+        let va = versionParts(a.version), vb = versionParts(b.version)
+        if va != vb { return vb.lexicographicallyPrecedes(va) }
+        return a.app.path < b.app.path
+    }
+}
 let resources = Bundle.main.resourceURL!
 let layerDir = resources.appendingPathComponent("layer")
 let scriptsDir = resources.appendingPathComponent("scripts")
@@ -59,33 +127,45 @@ func sha256(_ url: URL) -> String? {
     return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
 }
 
-func bottles() -> [String] {
-    let names = (try? FileManager.default.contentsOfDirectory(atPath: bottlesDir.path)) ?? []
-    return names.filter { FileManager.default.fileExists(atPath: bottlesDir.appendingPathComponent("\($0)/drive_c").path) }.sorted()
+func bottles(in root: URL) -> [String] {
+    let names = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
+    return names.filter { FileManager.default.fileExists(atPath: root.appendingPathComponent("\($0)/drive_c").path) }.sorted()
 }
 
 struct Target {
     let bottle: String
+    let root: URL        // folder containing the bottle
     let folder: String   // wrapper folder relative to drive_c, with "/" separators
-    var driveC: URL { bottlesDir.appendingPathComponent("\(bottle)/drive_c") }
+    let crossOver: URL   // the CrossOver .app that owns the bottle
+    var driveC: URL { root.appendingPathComponent("\(bottle)/drive_c") }
     var wrapperDir: URL { driveC.appendingPathComponent(folder) }
-    var env: [String: String] { ["BOTTLE": bottle, "AZDIR": folder, "FH2_BUILD": layerDir.path] }
+    var env: [String: String] {
+        ["BOTTLE": bottle, "AZDIR": folder, "FH2_BUILD": layerDir.path,
+         "BOTTLE_ROOT": root.path,
+         "CX": crossOver.appendingPathComponent("Contents/SharedSupport/CrossOver").path]
+    }
 }
 
 func savedTarget() -> Target? {
     guard let b = defaults.string(forKey: "Bottle"), let f = defaults.string(forKey: "WrapperFolder") else { return nil }
-    let t = Target(bottle: b, folder: f)
-    return FileManager.default.fileExists(atPath: t.wrapperDir.appendingPathComponent("azimuth.exe").path) ? t : nil
+    let root = URL(fileURLWithPath: defaults.string(forKey: "BottleRoot") ?? bottleRoot().path)
+    guard let app = defaults.string(forKey: "CrossOverApp").map(URL.init(fileURLWithPath:))
+            ?? crossOverInstalls().first?.app else { return nil }
+    let t = Target(bottle: b, root: root, folder: f, crossOver: app)
+    let fm = FileManager.default
+    return fm.fileExists(atPath: t.wrapperDir.appendingPathComponent("azimuth.exe").path)
+        && fm.fileExists(atPath: app.appendingPathComponent("Contents/SharedSupport/CrossOver/bin/wine").path) ? t : nil
 }
 
 enum SetupResult { case target(Target), uninstall(Target), quit }
 
-/// Asks for the bottle, then for the folder that contains azimuth.exe inside it.
-func setup(current: Target?) -> SetupResult {
-    let names = bottles()
+/// Asks for the bottle and the CrossOver installation, then for the folder that
+/// contains azimuth.exe inside the bottle.
+func setup(current: Target?, root: URL, installs: [CrossOverInstall]) -> SetupResult {
+    let names = bottles(in: root)
     if names.isEmpty {
         _ = alert("No CrossOver bottle found",
-                  "Create a Windows 10 64-bit bottle in CrossOver, put the Forza Horizon 2 wrapper in it, then open this app again.")
+                  "Create a Windows 10 64-bit bottle in CrossOver, put the Forza Horizon 2 wrapper in it, then open this app again.\n\nLooking in \(root.path), the folder CrossOver uses for its bottles.")
         return .quit
     }
     let a = NSAlert()
@@ -105,7 +185,24 @@ func setup(current: Target?) -> SetupResult {
     default: return .quit
     }
     let bottle = popup.titleOfSelectedItem!
-    let driveC = bottlesDir.appendingPathComponent("\(bottle)/drive_c").resolvingSymlinksInPath()
+    var crossOver = installs[0].app
+    if installs.count > 1 {
+        let c = NSAlert()
+        c.messageText = "Choose the CrossOver installation"
+        c.informativeText = "The layer needs the D3DMetal that comes with CrossOver. The list is ordered by D3DMetal version, newest first."
+        let pop = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 340, height: 26))
+        pop.addItems(withTitles: installs.map { "\($0.title) — D3DMetal \($0.d3dmetal.isEmpty ? "none" : $0.d3dmetal)" })
+        if let i = current.flatMap({ c0 in installs.firstIndex(where: { $0.app.path == c0.crossOver.path }) }) {
+            pop.selectItem(at: i)
+        }
+        c.accessoryView = pop
+        c.addButton(withTitle: "Continue")
+        c.addButton(withTitle: "Quit")
+        NSApp.activate(ignoringOtherApps: true)
+        guard c.runModal() == .alertFirstButtonReturn else { return .quit }
+        crossOver = installs[max(0, min(pop.indexOfSelectedItem, installs.count - 1))].app
+    }
+    let driveC = root.appendingPathComponent("\(bottle)/drive_c").resolvingSymlinksInPath()
     while true {
         let panel = NSOpenPanel()
         panel.message = "Choose the folder that contains azimuth.exe (inside the \(bottle) bottle)"
@@ -117,7 +214,7 @@ func setup(current: Target?) -> SetupResult {
         guard panel.runModal() == .OK, let dir = panel.url?.resolvingSymlinksInPath() else { return .quit }
         let inside = dir.path.hasPrefix(driveC.path + "/")
         if inside && FileManager.default.fileExists(atPath: dir.appendingPathComponent("azimuth.exe").path) {
-            return .target(Target(bottle: bottle, folder: String(dir.path.dropFirst(driveC.path.count + 1))))
+            return .target(Target(bottle: bottle, root: root, folder: String(dir.path.dropFirst(driveC.path.count + 1)), crossOver: crossOver))
         }
         let msg = inside ? "There is no azimuth.exe in \(dir.lastPathComponent)."
                          : "The folder must be inside the bottle's drive_c."
@@ -151,13 +248,15 @@ func ensureInstalled(_ t: Target) -> Bool {
 
 func main() {
     NSApp.setActivationPolicy(.regular)
-    guard FileManager.default.fileExists(atPath: crossover.path) else {
-        _ = alert("CrossOver not found", "This app runs the game through CrossOver (with D3DMetal). Install CrossOver in /Applications first.")
+    let installs = crossOverInstalls()
+    guard !installs.isEmpty else {
+        _ = alert("CrossOver not found", "This app runs the game through CrossOver (with D3DMetal). No CrossOver installation with bin/wine was found in /Applications. Install CrossOver there first.")
         return
     }
+    let root = bottleRoot()
     var target = savedTarget()
     if target == nil || NSEvent.modifierFlags.contains(.option) {
-        switch setup(current: target) {
+        switch setup(current: target, root: root, installs: installs) {
         case .quit: return
         case .uninstall(let t):
             let (status, out) = runScript("install.sh", ["--uninstall"], env: t.env)
@@ -167,6 +266,8 @@ func main() {
         case .target(let t):
             defaults.set(t.bottle, forKey: "Bottle")
             defaults.set(t.folder, forKey: "WrapperFolder")
+            defaults.set(t.root.path, forKey: "BottleRoot")
+            defaults.set(t.crossOver.path, forKey: "CrossOverApp")
             target = t
         }
     }

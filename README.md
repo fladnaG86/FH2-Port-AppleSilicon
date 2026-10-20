@@ -58,9 +58,13 @@ memory**, after Azimuth has loaded the game; the game files on disk stay untouch
 3. Open the DMG from the [Releases](../../releases), drag **FH2 Port** to Applications and open it.
    It is not notarized: the first time, click "Done", then System Settings › Privacy & Security ›
    **Open Anyway**.
-4. Choose the bottle, then the folder that contains `azimuth.exe`. The app installs the layer and
-   starts the game; later a double-click is enough. Hold **Option** while opening it to choose
-   again or to uninstall.
+4. Choose the bottle, the CrossOver installation that runs it, then the folder that contains
+   `azimuth.exe`. The app installs the layer and starts the game; later a double-click is enough.
+   Hold **Option** while opening it to choose again or to uninstall.
+
+The app reads the bottle folder from CrossOver's own **BottleDir** preference, so a custom bottle
+folder works without extra setup, and it lists every CrossOver in `/Applications`, newest D3DMetal
+first.
 
 The app also sets `antialiasing=off` (MSAA draws dashes in the sky on D3DMetal) and
 `resolution=1440`, which supersamples and smooths the edges.
@@ -73,6 +77,9 @@ make                                             # build/d3d12.dll, build/fh2pad
 BOTTLE=<bottle> AZDIR=<folder> scripts/install.sh --settings
 BOTTLE=<bottle> AZDIR=<folder> scripts/run.sh    # MTL_HUD_ENABLED=1 for the Metal HUD
 ```
+
+Both scripts take `BOTTLE_ROOT` (the folder holding the bottles, default CrossOver's standard one)
+and `CX` (the CrossOver installation, default `/Applications/CrossOver.app/Contents/SharedSupport/CrossOver`).
 
 `install.sh` copies the two DLLs next to `azimuth.exe`, adds per-application DLL overrides for
 `azimuth.exe` (`d3d12` native-then-builtin, `d3dcompiler_47` and the VC++ 2012 runtime native),
@@ -167,9 +174,13 @@ memoria**, dopo che Azimuth ha caricato il gioco; i file del gioco su disco rest
 3. Apri la DMG dalle [Release](../../releases), trascina **FH2 Port** in Applicazioni e aprila.
    Non è notarizzata: la prima volta clicca "Fine", poi Impostazioni di Sistema › Privacy e
    sicurezza › **Apri comunque**.
-4. Scegli la bottle e poi la cartella che contiene `azimuth.exe`. L'app installa il layer e avvia il
-   gioco; le volte dopo basta il doppio clic. Tieni premuto **Opzione** mentre la apri per
-   scegliere di nuovo o per disinstallare.
+4. Scegli la bottle, l'installazione di CrossOver che la esegue e poi la cartella che contiene
+   `azimuth.exe`. L'app installa il layer e avvia il gioco; le volte dopo basta il doppio clic.
+   Tieni premuto **Opzione** mentre la apri per scegliere di nuovo o per disinstallare.
+
+L'app legge la cartella delle bottle dalla preferenza **BottleDir** di CrossOver, quindi una
+cartella personalizzata funziona senza altri passaggi, ed elenca ogni CrossOver in `/Applications`
+partendo dal D3DMetal più recente.
 
 L'app imposta anche `antialiasing=off` (con l'MSAA il cielo ha dei trattini su D3DMetal) e
 `resolution=1440`, che fa supersampling e ammorbidisce i bordi.
@@ -177,8 +188,9 @@ L'app imposta anche `antialiasing=off` (con l'MSAA il cielo ha dei trattini su D
 ### Installazione a mano
 
 Comandi nella sezione inglese: `make`, poi `scripts/install.sh --settings` e `scripts/run.sh` con
-`BOTTLE` e `AZDIR`. `install.sh --uninstall` annulla tutto; `tools/app/make_app.sh <versione>`
-costruisce app e DMG.
+`BOTTLE` e `AZDIR` (e `BOTTLE_ROOT` / `CX` per una cartella o un'installazione di CrossOver
+diverse). `install.sh --uninstall` annulla tutto; `tools/app/make_app.sh <versione>` costruisce app
+e DMG.
 
 ### Tastiera
 

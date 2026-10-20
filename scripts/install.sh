@@ -2,8 +2,10 @@
 # Installs the layer into a CrossOver bottle without modifying the wrapper.
 #
 #   scripts/install.sh [--settings] [--uninstall]
-#   BOTTLE  CrossOver bottle name                    (default: azimuth)
-#   AZDIR   wrapper folder inside the bottle drive_c (default: Azimuth)
+#   BOTTLE       CrossOver bottle name                    (default: azimuth)
+#   AZDIR        wrapper folder inside the bottle drive_c (default: Azimuth)
+#   BOTTLE_ROOT  folder holding the bottles   (default: CrossOver's standard one)
+#   CX           CrossOver installation       (default: /Applications/CrossOver.app…)
 #
 # What it changes, all outside the wrapper's own files:
 #   - copies build/d3d12.dll and build/fh2pad.dll next to azimuth.exe
@@ -20,9 +22,11 @@ AZDIR=${AZDIR:-Azimuth}
 HERE=${0:A:h:h}
 BUILD=${FH2_BUILD:-$HERE/build}
 WINDIR=${AZDIR//\//\\}   # C:\ path of the wrapper folder, for nested folders too
-CX=/Applications/CrossOver.app/Contents/SharedSupport/CrossOver
+BOTTLE_ROOT=${BOTTLE_ROOT:-$HOME/Library/Application Support/CrossOver/Bottles}
+CX=${CX:-/Applications/CrossOver.app/Contents/SharedSupport/CrossOver}
+export CX_BOTTLE_PATH="$BOTTLE_ROOT"
 WINE="$CX/bin/wine"
-DRIVE="$HOME/Library/Application Support/CrossOver/Bottles/$BOTTLE/drive_c"
+DRIVE="$BOTTLE_ROOT/$BOTTLE/drive_c"
 A="$DRIVE/$AZDIR"
 APPKEY='HKCU\Software\Wine\AppDefaults\azimuth.exe\DllOverrides'
 PADKEY='HKLM\Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Gaming.Input.Gamepad'
