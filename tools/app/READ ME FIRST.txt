@@ -14,8 +14,10 @@ and no keys, and it never modifies Azimuth. You need:
   - Microsoft's d3dcompiler_47.dll in the Azimuth folder (see the README).
 
 1. PREPARE CROSSOVER
-   Create a Windows 10 64-bit bottle, copy the Azimuth folder into its drive_c
-   and run azimuth.exe once from CrossOver to choose your game folder.
+   In CrossOver (or CrossOver Preview) create a Windows 10 64-bit bottle and
+   copy the Azimuth folder into its drive_c. Do NOT start azimuth.exe from
+   CrossOver: without this app's layer it stops with heap / DX12 errors.
+   You choose the game folder in step 4.
 
 2. INSTALL
    Drag "FH2 Port" onto the "Applications" folder in this window.
@@ -32,9 +34,10 @@ and no keys, and it never modifies Azimuth. You need:
 4. CHOOSE THE BOTTLE AND THE AZIMUTH FOLDER
    The first time, the app asks for the CrossOver bottle and then for the
    folder that contains azimuth.exe. It installs its two DLLs next to
-   azimuth.exe, sets the bottle up and starts the game. It remembers your
-   choice. To choose again, or to uninstall the layer, hold the Option key
-   while you open the app. If your bottle is in a custom Bottles folder
+   azimuth.exe, sets the bottle up and starts Azimuth, which asks for your
+   game folder the first time; then quit and open the app once more so it
+   applies its settings. It remembers your choice. To choose again, or to
+   uninstall the layer, hold the Option key while you open the app. If your bottle is in a custom Bottles folder
    (for example on an external disk) and is not listed, pick "Other bottle
    folder..." and choose the bottle's folder (the one with drive_c).
 
@@ -67,9 +70,10 @@ chiavi, e non modifica mai Azimuth. Ti servono:
   - il d3dcompiler_47.dll di Microsoft nella cartella di Azimuth (vedi README).
 
 1. PREPARA CROSSOVER
-   Crea una bottle Windows 10 64-bit, copia la cartella di Azimuth nel suo
-   drive_c e avvia azimuth.exe una volta da CrossOver per scegliere la
-   cartella del gioco.
+   In CrossOver (o CrossOver Preview) crea una bottle Windows 10 64-bit e
+   copia la cartella di Azimuth nel suo drive_c. NON avviare azimuth.exe da
+   CrossOver: senza il layer di questa app si ferma con errori heap / DX12.
+   La cartella del gioco la scegli al passo 4.
 
 2. INSTALLAZIONE
    Trascina "FH2 Port" sulla cartella "Applicazioni" in questa finestra.
@@ -86,7 +90,9 @@ chiavi, e non modifica mai Azimuth. Ti servono:
 4. SCEGLI LA BOTTLE E LA CARTELLA DI AZIMUTH
    La prima volta l'app chiede la bottle di CrossOver e poi la cartella che
    contiene azimuth.exe. Installa le sue due DLL accanto ad azimuth.exe,
-   configura la bottle e avvia il gioco. Ricorda la scelta. Per scegliere di
+   configura la bottle e avvia Azimuth, che la prima volta chiede la
+   cartella del gioco; poi chiudi e riapri l'app una volta perché applichi
+   le sue impostazioni. Ricorda la scelta. Per scegliere di
    nuovo, o per disinstallare il layer, tieni premuto Opzione (alt) mentre
    apri l'app. Se la bottle è in una cartella Bottles personalizzata (per
    esempio su un disco esterno) e non compare, scegli "Other bottle

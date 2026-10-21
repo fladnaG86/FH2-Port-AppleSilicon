@@ -20,7 +20,9 @@ AZDIR=${AZDIR:-Azimuth}
 HERE=${0:A:h:h}
 BUILD=${FH2_BUILD:-$HERE/build}
 WINDIR=${AZDIR//\//\\}   # C:\ path of the wrapper folder, for nested folders too
-CX=/Applications/CrossOver.app/Contents/SharedSupport/CrossOver
+# CROSSOVER: the CrossOver app to use (the launcher also finds CrossOver Preview)
+CROSSOVER=${CROSSOVER:-/Applications/CrossOver.app}
+CX="$CROSSOVER/Contents/SharedSupport/CrossOver"
 WINE="$CX/bin/wine"
 # a bare name is looked up in the default bottle folder; CrossOver also takes a full path
 [[ $BOTTLE == /* ]] || BOTTLE="$HOME/Library/Application Support/CrossOver/Bottles/$BOTTLE"

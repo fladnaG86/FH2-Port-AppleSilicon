@@ -6,7 +6,9 @@
 set -u
 BOTTLE=${BOTTLE:-azimuth}
 AZDIR=${AZDIR:-Azimuth}
-CX=/Applications/CrossOver.app/Contents/SharedSupport/CrossOver
+# CROSSOVER: the CrossOver app to use (the launcher also finds CrossOver Preview)
+CROSSOVER=${CROSSOVER:-/Applications/CrossOver.app}
+CX="$CROSSOVER/Contents/SharedSupport/CrossOver"
 # a bare name is looked up in the default bottle folder; CrossOver also takes a full path
 [[ $BOTTLE == /* ]] || BOTTLE="$HOME/Library/Application Support/CrossOver/Bottles/$BOTTLE"
 export CX_BOTTLE=$BOTTLE CX_GRAPHICS_BACKEND=d3dmetal ROSETTA_ADVERTISE_AVX=1

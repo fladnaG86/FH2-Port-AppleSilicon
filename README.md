@@ -30,6 +30,14 @@ only adds layers *underneath* it, the way DXVK or vkd3d sit under a game:
 Developed and tested on a MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver on Wine 11 with
 GPTK 4.0b3. Free roam, races, menus, audio, controllers and keyboard work.
 
+### What's new
+
+- **0.1.4**: the launcher also finds **CrossOver Preview**. The install steps no longer tell you to
+  start `azimuth.exe` from CrossOver first: without the layer it stops with heap / DX12 errors
+  before it asks for the game folder. Open FH2 Port instead; Azimuth then asks for the folder.
+- **0.1.3**: bottles in a custom Bottles folder (for example on an external SSD) are found, and
+  **Other bottle folder…** lets you pick any bottle by hand.
+
 ### What the layer does
 
 | Problem on D3DMetal | What the layer does |
@@ -50,8 +58,9 @@ memory**, after Azimuth has loaded the game; the game files on disk stay untouch
 
 ### Install with the app
 
-1. In CrossOver create a **Windows 10 64-bit** bottle, copy the Azimuth folder into its `drive_c`
-   and run `azimuth.exe` once to pick your game folder.
+1. In CrossOver (or CrossOver Preview) create a **Windows 10 64-bit** bottle and copy the Azimuth
+   folder into its `drive_c`. Do not start `azimuth.exe` from CrossOver: without the layer it stops
+   at D3D12 checks (heap / DX12 errors) before it asks for the game folder.
 2. Put Microsoft's **`d3dcompiler_47.dll`** in the Azimuth folder (Wine's one cannot compile
    Azimuth's GPU detile shader). It is not included here; one source is the `core/` folder of the
    Firefox 62 Windows 64-bit installer.
@@ -59,7 +68,8 @@ memory**, after Azimuth has loaded the game; the game files on disk stay untouch
    It is not notarized: the first time, click "Done", then System Settings › Privacy & Security ›
    **Open Anyway**.
 4. Choose the bottle, then the folder that contains `azimuth.exe`. The app installs the layer and
-   starts the game; later a double-click is enough. Hold **Option** while opening it to choose
+   starts Azimuth, which asks for your game folder the first time (open the app once more after
+   that so it applies its settings); later a double-click is enough. Hold **Option** while opening it to choose
    again or to uninstall. Bottles in a custom Bottles folder (for example on an external disk)
    are found too; otherwise pick **Other bottle folder…** and choose the bottle's folder.
 
@@ -140,6 +150,14 @@ Sviluppato e provato su MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver su Win
 4.0b3. Mondo aperto, gare, menu, audio, controller e tastiera funzionano; con Azimuth a 60 fps e
 1440 righe il gioco sta intorno ai 60 fps ([video](https://github.com/fladnaG86/FH2-Port-AppleSilicon/releases/tag/video)).
 
+### Novità
+
+- **0.1.4**: il launcher trova anche **CrossOver Preview**. I passi di installazione non dicono più
+  di avviare prima `azimuth.exe` da CrossOver: senza il layer si ferma con errori heap / DX12 prima
+  di chiedere la cartella del gioco. Apri invece FH2 Port; poi Azimuth chiede la cartella.
+- **0.1.3**: trova le bottle in una cartella Bottles personalizzata (per esempio su un SSD esterno),
+  e **Other bottle folder…** permette di scegliere a mano qualsiasi bottle.
+
 ### Cosa fa il layer
 
 | Problema su D3DMetal | Cosa fa il layer |
@@ -160,16 +178,18 @@ memoria**, dopo che Azimuth ha caricato il gioco; i file del gioco su disco rest
 
 ### Installazione con l'app
 
-1. In CrossOver crea una bottle **Windows 10 64-bit**, copia la cartella di Azimuth nel suo
-   `drive_c` e avvia `azimuth.exe` una volta per scegliere la cartella del gioco.
+1. In CrossOver (o CrossOver Preview) crea una bottle **Windows 10 64-bit** e copia la cartella di
+   Azimuth nel suo `drive_c`. Non avviare `azimuth.exe` da CrossOver: senza il layer si ferma ai
+   controlli D3D12 (errori heap / DX12) prima di chiedere la cartella del gioco.
 2. Metti **`d3dcompiler_47.dll`** di Microsoft nella cartella di Azimuth (quello di Wine non compila
    il suo shader di detile). Non è incluso; si trova per esempio nella cartella `core/`
    dell'installer Windows 64-bit di Firefox 62.
 3. Apri la DMG dalle [Release](../../releases), trascina **FH2 Port** in Applicazioni e aprila.
    Non è notarizzata: la prima volta clicca "Fine", poi Impostazioni di Sistema › Privacy e
    sicurezza › **Apri comunque**.
-4. Scegli la bottle e poi la cartella che contiene `azimuth.exe`. L'app installa il layer e avvia il
-   gioco; le volte dopo basta il doppio clic. Tieni premuto **Opzione** mentre la apri per
+4. Scegli la bottle e poi la cartella che contiene `azimuth.exe`. L'app installa il layer e avvia
+   Azimuth, che la prima volta chiede la cartella del gioco (dopo riapri l'app una volta perché
+   applichi le sue impostazioni); le volte dopo basta il doppio clic. Tieni premuto **Opzione** mentre la apri per
    scegliere di nuovo o per disinstallare. Trova anche le bottle in una cartella Bottles
    personalizzata (per esempio su un disco esterno); altrimenti scegli **Other bottle folder…** e
    indica la cartella della bottle.

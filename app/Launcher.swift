@@ -7,7 +7,21 @@
 import AppKit
 import CryptoKit
 
-let crossover = URL(fileURLWithPath: "/Applications/CrossOver.app")
+/// CrossOver itself, or CrossOver Preview (both keep bottles in the same folder).
+func findCrossOver() -> URL? {
+    let fm = FileManager.default
+    var candidates = [URL(fileURLWithPath: "/Applications/CrossOver.app")]
+    for id in ["com.codeweavers.CrossOver", "com.codeweavers.CrossOverPreview"] {
+        candidates += NSWorkspace.shared.urlsForApplications(withBundleIdentifier: id)
+    }
+    for dir in [URL(fileURLWithPath: "/Applications"), fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications")] {
+        let names = (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
+        candidates += names.filter { $0.hasPrefix("CrossOver") && $0.hasSuffix(".app") }.sorted().map { dir.appendingPathComponent($0) }
+    }
+    return candidates.first { fm.isExecutableFile(atPath: $0.appendingPathComponent("Contents/SharedSupport/CrossOver/bin/wine").path) }
+}
+
+let crossover = findCrossOver()
 let defaultBottlesDir = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Application Support/CrossOver/Bottles")
 let resources = Bundle.main.resourceURL!
@@ -64,12 +78,15 @@ func sha256(_ url: URL) -> String? {
 /// CrossOver.conf, CX_BOTTLE_PATH, and the default one.
 func bottleDirs() -> [URL] {
     var paths: [String] = []
-    let cx = UserDefaults(suiteName: "com.codeweavers.CrossOver")
-    if let dir = cx?.string(forKey: "BottleDir") { paths.append(dir) }
-    if let data = cx?.data(forKey: "BottleDir") {
-        var stale = false
-        if let url = try? URL(resolvingBookmarkData: data, options: [.withoutUI], bookmarkDataIsStale: &stale) {
-            paths.append(url.path)
+    let ids = Set(["com.codeweavers.CrossOver"] + [crossover.flatMap { Bundle(url: $0)?.bundleIdentifier }].compactMap { $0 })
+    for id in ids.sorted() {
+        let cx = UserDefaults(suiteName: id)
+        if let dir = cx?.string(forKey: "BottleDir") { paths.append(dir) }
+        if let data = cx?.data(forKey: "BottleDir") {
+            var stale = false
+            if let url = try? URL(resolvingBookmarkData: data, options: [.withoutUI], bookmarkDataIsStale: &stale) {
+                paths.append(url.path)
+            }
         }
     }
     let conf = defaultBottlesDir.deletingLastPathComponent().appendingPathComponent("CrossOver.conf")
@@ -116,7 +133,7 @@ struct Target {
     }
     var driveC: URL { URL(fileURLWithPath: bottle).appendingPathComponent("drive_c") }
     var wrapperDir: URL { driveC.appendingPathComponent(folder) }
-    var env: [String: String] { ["BOTTLE": bottle, "AZDIR": folder, "FH2_BUILD": layerDir.path] }
+    var env: [String: String] { ["BOTTLE": bottle, "AZDIR": folder, "FH2_BUILD": layerDir.path, "CROSSOVER": crossover?.path ?? ""] }
 }
 
 func savedTarget() -> Target? {
@@ -224,10 +241,11 @@ func ensureInstalled(_ t: Target) -> Bool {
 
 func main() {
     NSApp.setActivationPolicy(.regular)
-    guard FileManager.default.fileExists(atPath: crossover.path) else {
-        _ = alert("CrossOver not found", "This app runs the game through CrossOver (with D3DMetal). Install CrossOver in /Applications first.")
+    guard let cx = crossover else {
+        _ = alert("CrossOver not found", "This app runs the game through CrossOver (with D3DMetal). Install CrossOver or CrossOver Preview in Applications first.")
         return
     }
+    log("CrossOver: \(cx.path)")
     var target = savedTarget()
     if target == nil || NSEvent.modifierFlags.contains(.option) {
         switch setup(current: target) {
