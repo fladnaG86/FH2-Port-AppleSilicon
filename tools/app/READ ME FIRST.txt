@@ -34,7 +34,9 @@ and no keys, and it never modifies Azimuth. You need:
    folder that contains azimuth.exe. It installs its two DLLs next to
    azimuth.exe, sets the bottle up and starts the game. It remembers your
    choice. To choose again, or to uninstall the layer, hold the Option key
-   while you open the app.
+   while you open the app. If your bottle is in a custom Bottles folder
+   (for example on an external disk) and is not listed, pick "Other bottle
+   folder..." and choose the bottle's folder (the one with drive_c).
 
 5. PLAY
    A DualSense / Xbox controller works, and so does the keyboard:
@@ -86,7 +88,9 @@ chiavi, e non modifica mai Azimuth. Ti servono:
    contiene azimuth.exe. Installa le sue due DLL accanto ad azimuth.exe,
    configura la bottle e avvia il gioco. Ricorda la scelta. Per scegliere di
    nuovo, o per disinstallare il layer, tieni premuto Opzione (alt) mentre
-   apri l'app.
+   apri l'app. Se la bottle è in una cartella Bottles personalizzata (per
+   esempio su un disco esterno) e non compare, scegli "Other bottle
+   folder..." e indica la cartella della bottle (quella con drive_c).
 
 5. GIOCA
    Funziona un controller DualSense / Xbox, e anche la tastiera:

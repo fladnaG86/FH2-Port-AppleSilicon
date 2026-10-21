@@ -2,7 +2,7 @@
 # Installs the layer into a CrossOver bottle without modifying the wrapper.
 #
 #   scripts/install.sh [--settings] [--uninstall]
-#   BOTTLE  CrossOver bottle name                    (default: azimuth)
+#   BOTTLE  CrossOver bottle name or full path       (default: azimuth)
 #   AZDIR   wrapper folder inside the bottle drive_c (default: Azimuth)
 #
 # What it changes, all outside the wrapper's own files:
@@ -22,7 +22,9 @@ BUILD=${FH2_BUILD:-$HERE/build}
 WINDIR=${AZDIR//\//\\}   # C:\ path of the wrapper folder, for nested folders too
 CX=/Applications/CrossOver.app/Contents/SharedSupport/CrossOver
 WINE="$CX/bin/wine"
-DRIVE="$HOME/Library/Application Support/CrossOver/Bottles/$BOTTLE/drive_c"
+# a bare name is looked up in the default bottle folder; CrossOver also takes a full path
+[[ $BOTTLE == /* ]] || BOTTLE="$HOME/Library/Application Support/CrossOver/Bottles/$BOTTLE"
+DRIVE="$BOTTLE/drive_c"
 A="$DRIVE/$AZDIR"
 APPKEY='HKCU\Software\Wine\AppDefaults\azimuth.exe\DllOverrides'
 PADKEY='HKLM\Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Gaming.Input.Gamepad'

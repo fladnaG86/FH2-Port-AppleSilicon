@@ -60,7 +60,8 @@ memory**, after Azimuth has loaded the game; the game files on disk stay untouch
    **Open Anyway**.
 4. Choose the bottle, then the folder that contains `azimuth.exe`. The app installs the layer and
    starts the game; later a double-click is enough. Hold **Option** while opening it to choose
-   again or to uninstall.
+   again or to uninstall. Bottles in a custom Bottles folder (for example on an external disk)
+   are found too; otherwise pick **Other bottle folder…** and choose the bottle's folder.
 
 The app also sets `antialiasing=off` (MSAA draws dashes in the sky on D3DMetal) and
 `resolution=1440`, which supersamples and smooths the edges.
@@ -169,7 +170,9 @@ memoria**, dopo che Azimuth ha caricato il gioco; i file del gioco su disco rest
    sicurezza › **Apri comunque**.
 4. Scegli la bottle e poi la cartella che contiene `azimuth.exe`. L'app installa il layer e avvia il
    gioco; le volte dopo basta il doppio clic. Tieni premuto **Opzione** mentre la apri per
-   scegliere di nuovo o per disinstallare.
+   scegliere di nuovo o per disinstallare. Trova anche le bottle in una cartella Bottles
+   personalizzata (per esempio su un disco esterno); altrimenti scegli **Other bottle folder…** e
+   indica la cartella della bottle.
 
 L'app imposta anche `antialiasing=off` (con l'MSAA il cielo ha dei trattini su D3DMetal) e
 `resolution=1440`, che fa supersampling e ammorbidisce i bordi.
