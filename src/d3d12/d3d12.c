@@ -2346,6 +2346,54 @@ static DWORD WINAPI game_fixup_thread(void *arg)
     return 0;
 }
 
+/* ---------------- thread priorities ---------------- */
+
+/* Wine on macOS gives threads of normal priority Mach priority 26, below the 31
+ * of native threads, and Azimuth's worker, queue and many game threads run there;
+ * the scheduler then treats them as less urgent and frames come late. Every 2 s
+ * every thread below Windows priority n is raised to n: by default 1 (above
+ * normal, which Wine maps to 31). That halved the late frames in busy places;
+ * 2 (highest, Mach 35) gave nothing more. FH2_PRIO=0 leaves priorities alone.
+ * The first pass logs how many threads had each priority. */
+static int prio_target;
+
+static DWORD WINAPI prio_thread(void *arg)
+{
+    DWORD pid = GetCurrentProcessId();
+    BOOL first = TRUE;
+    (void)arg;
+    for (;;) {
+        int seen[5] = {0};   /* lowest, below normal, normal, above normal, highest+ */
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        THREADENTRY32 te = {sizeof(te)};
+        int raised = 0;
+        if (snap != INVALID_HANDLE_VALUE) {
+            for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
+                HANDLE t;
+                if (te.th32OwnerProcessID != pid) continue;
+                if (!(t = OpenThread(THREAD_QUERY_INFORMATION | THREAD_SET_INFORMATION, FALSE, te.th32ThreadID)))
+                    continue;
+                {
+                    int p = GetThreadPriority(t);
+                    seen[p <= -2 ? 0 : p >= 2 ? 4 : p + 2]++;
+                    if (p < prio_target) {
+                        if (SetThreadPriority(t, prio_target)) raised++;
+                        else if (first) logmsg("priorities: thread %lu not raised, error %lu", te.th32ThreadID, GetLastError());
+                    }
+                }
+                CloseHandle(t);
+            }
+            CloseHandle(snap);
+        }
+        if (first || raised)
+            logmsg("priorities: lowest %d, below normal %d, normal %d, above normal %d, highest+ %d; %d raised to %d",
+                   seen[0], seen[1], seen[2], seen[3], seen[4], raised, prio_target);
+        first = FALSE;
+        Sleep(2000);
+    }
+    return 0;
+}
+
 /* ---------------- FlushProcessWriteBuffers ---------------- */
 
 /* Azimuth calls FlushProcessWriteBuffers from several threads, its worker very
@@ -3987,6 +4035,9 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
             AddVectoredExceptionHandler(1, fiber_fault_handler);
             CloseHandle(CreateThread(NULL, 0, game_fixup_thread, NULL, 0, NULL));
         }
+        prio_target = GetEnvironmentVariableA("FH2_PRIO", v, sizeof(v)) ? atoi(v) : 1;
+        if (prio_target > 0 && GetModuleHandleA("azimuth.exe"))
+            CloseHandle(CreateThread(NULL, 0, prio_thread, NULL, 0, NULL));
         flush_nolock = GetEnvironmentVariableA("FH2_FLUSH", v, sizeof(v)) && !strcmp(v, "nolock");
         flush_skip = GetEnvironmentVariableA("FH2_FLUSH", v, sizeof(v)) && !strcmp(v, "skip");
         if (!(GetEnvironmentVariableA("FH2_FLUSH", v, sizeof(v)) && v[0] == '0') && GetModuleHandleA("azimuth.exe") &&
