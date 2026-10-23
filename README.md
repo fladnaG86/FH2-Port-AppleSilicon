@@ -32,6 +32,9 @@ GPTK 4.0b3. Free roam, races, menus, audio, controllers and keyboard work.
 
 ### What's new
 
+- **Next release (in `main`)**: about **half the stutter** in busy places. Wine on macOS runs threads
+  of normal Windows priority below native apps (Mach priority 26 instead of 31), and Azimuth's
+  worker and many game threads sit there; the layer now raises them to the native level.
 - **0.1.5**: fixes the **random freeze** (no Present, Azimuth's watchdog reporting its worker stuck)
   seen after anything from 1 to 30 minutes, in the intro movie or in game. Wine on macOS implements
   `FlushProcessWriteBuffers` by reading every thread's registers; under Rosetta two threads doing
@@ -51,6 +54,7 @@ GPTK 4.0b3. Free roam, races, menus, audio, controllers and keyboard work.
 | Azimuth only starts on devices that report existing heaps and resource binding tier 3 | Both reported as supported (existing heaps are the emulation above) |
 | Tiled resources do not alias | Reported as unsupported, so Azimuth takes another path |
 | `FlushProcessWriteBuffers` (Wine on macOS reads every thread's registers) deadlocks under Rosetta when two threads call it at once | ntdll's `NtFlushProcessWriteBuffers` is hooked in memory and lets one caller through at a time |
+| Threads of normal Windows priority get Mach priority 26, below native apps' 31 | Every 2 s, threads below above-normal are raised to above-normal (Mach 31) |
 | **Input layouts using `D3D12_APPEND_ALIGNED_ELEMENT` over several vertex buffers get wrong offsets.** In the world-prop layout `I_YAXIS` is fetched 28 bytes and `I_COLOUR` 56 bytes past their real position | Offsets are written out per slot before the layout reaches D3DMetal. This fixes the giant "phantom walls", black or upside-down trees, bent poles and misaligned barriers |
 
 The input-layout bug has a standalone repro, `layout_test` in `src/d3d12/d3d12.c`, run by
@@ -124,6 +128,7 @@ Keys count only while the game window has focus; keyboard and controllers work t
   if it still happens, with `azimuth.log` and `fh2port.log`.
 - **Stutter** in busy places (for example the buildings around Place Masséna in Nice): the game's
   own threads run out of CPU time there under Rosetta; the GPU and the layer are not the limit.
+  Raising thread priorities (in `main`) halves it; what is left is Rosetta's limit.
 - MSAA must stay off. The intro movies play (no intro skip).
 
 ### Debugging
@@ -134,7 +139,8 @@ Logs are in `data/logs` of the Azimuth folder (`fh2port.log`, `fh2pad.log`, `azi
 through unfixed), `FH2_FIBER=0`, `FH2_TILED=1`, `FH2_SKIP_EI=1`, `FH2_SKIP_VID=1`, `FH2_PATCH=…`,
 `FH2_LABEL=<address>` (traces the values written to that address through record, execute, signal
 and completion), `FH2_FLUSH=0|nolock|skip` (flush fix off / timed without the lock / replaced by a
-local fence, diagnostic only), `FH2_QUIET=1` (no periodic log lines, control file not polled).
+local fence, diagnostic only), `FH2_QUIET=1` (no periodic log lines, control file not polled),
+`FH2_PRIO=<n>` (Windows priority threads are raised to; default 1, `0` leaves them alone).
 Calls into D3DMetal slower than 4 ms are logged as `slow:`. Live commands go through `data/logs/fh2port.ctl` (`top`, `reset`, `dump N`,
 `tint …`, `tintlist`, `tintset …`, `watch …`, `patch on|off`, `stacks` for the Windows-side call
 stack of every thread, useful when the game hangs).
@@ -162,6 +168,9 @@ Sviluppato e provato su MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver su Win
 
 ### Novità
 
+- **Prossima release (in `main`)**: circa **metà degli scatti** nei punti affollati. Wine su macOS
+  fa girare i thread a priorità normale di Windows sotto le app native (priorità Mach 26 invece di
+  31), e lì stanno il worker di Azimuth e molti thread del gioco; ora il layer li porta al livello nativo.
 - **0.1.5**: corregge il **blocco casuale** (nessun Present, il watchdog di Azimuth segnala il
   worker fermo) che arrivava dopo 1–30 minuti, nel filmato iniziale o in gioco. Wine su macOS
   implementa `FlushProcessWriteBuffers` leggendo i registri di ogni thread; sotto Rosetta due thread
@@ -181,6 +190,7 @@ Sviluppato e provato su MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver su Win
 | Azimuth parte solo se il device dichiara existing heaps e resource binding tier 3 | Entrambi dichiarati supportati (gli existing heaps sono l'emulazione qui sopra) |
 | Le tiled resource non fanno aliasing | Dichiarate non supportate, così Azimuth usa un'altra strada |
 | `FlushProcessWriteBuffers` (Wine su macOS legge i registri di ogni thread) si blocca sotto Rosetta se due thread la chiamano insieme | `NtFlushProcessWriteBuffers` di ntdll è agganciata in memoria e fa passare un chiamante alla volta |
+| I thread a priorità normale di Windows ricevono priorità Mach 26, sotto il 31 delle app native | Ogni 2 s i thread sotto above-normal vengono portati ad above-normal (Mach 31) |
 | **I layout con `D3D12_APPEND_ALIGNED_ELEMENT` su più vertex buffer ricevono offset sbagliati.** Nel layout degli oggetti del mondo `I_YAXIS` viene letto 28 byte e `I_COLOUR` 56 byte più avanti | Gli offset vengono scritti per ogni slot prima di passare il layout a D3DMetal. Questo corregge i "muri fantasma" giganti, gli alberi neri o capovolti, i pali storti e le sponde disallineate |
 
 Il bug dei layout ha una riproduzione autonoma, `layout_test` in `src/d3d12/d3d12.c`, eseguita da
@@ -247,6 +257,7 @@ insieme. `FH2_KEYBOARD=0` lascia i gamepad di Wine come sono.
   `fh2port.log`.
 - **Scatti** nei punti affollati (per esempio i palazzi intorno a Place Masséna a Nizza): lì i thread
   del gioco sotto Rosetta non hanno abbastanza CPU; né la GPU né il layer sono il limite.
+  Alzare la priorità dei thread (in `main`) li dimezza; quel che resta è il limite di Rosetta.
 - L'MSAA va lasciato spento. I filmati iniziali vengono riprodotti (niente salto dell'intro).
 
 ### Licenza
