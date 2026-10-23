@@ -38,6 +38,8 @@ static serialize_rs_fn real_serialize_rs;
 
 static FILE *logf;
 static CRITICAL_SECTION log_cs;
+/* FH2_QUIET=1: no periodic draws/stats lines and no control file polling (stutter test) */
+static BOOL quiet;
 
 static void logmsg(const char *fmt, ...)
 {
@@ -51,6 +53,24 @@ static void logmsg(const char *fmt, ...)
     fputc('\n', logf);
     fflush(logf);
     LeaveCriticalSection(&log_cs);
+}
+
+/* stutter probe: a hooked call slower than 4 ms is logged with its duration */
+static LARGE_INTEGER slow_freq;
+
+static LONG64 slow_start(void)
+{
+    LARGE_INTEGER t;
+    QueryPerformanceCounter(&t);
+    return t.QuadPart;
+}
+
+static void slow_end(const char *what, LONG64 t0)
+{
+    LARGE_INTEGER t;
+    QueryPerformanceCounter(&t);
+    if (slow_freq.QuadPart && (t.QuadPart - t0) * 1000 > slow_freq.QuadPart * 4)
+        logmsg("slow: %s %lld ms", what, (t.QuadPart - t0) * 1000 / slow_freq.QuadPart);
 }
 
 /* ---------------- regions ---------------- */
@@ -123,7 +143,7 @@ static void sync_down(void)
             }
         }
     }
-    if ((++stat_syncs & 1023) == 0)
+    if ((++stat_syncs & 1023) == 0 && !quiet)
         logmsg("stats syncs=%llu up=%llu down=%llu conflicts=%llu regions=%ld heaps=%ld textures=%llu imm=%llu applied=%llu wbi_copied=%llu wbi_unknown=%llu tile_updates=%llu",
                stat_syncs, stat_up_bytes, stat_down_bytes, stat_conflicts, nregions, nheaps, stat_textures,
                stat_imm, stat_imm_applied, stat_wbi_copied, stat_wbi_unknown, stat_tile_updates);
@@ -254,7 +274,7 @@ static DWORD WINAPI signal_worker(void *arg)
     for (;;) {
         job *j;
         static DWORD last_poll;
-        if (GetTickCount() - last_poll > 500) { last_poll = GetTickCount(); poll_control(); }
+        if (!quiet && GetTickCount() - last_poll > 500) { last_poll = GetTickCount(); poll_control(); }
         if (WaitForSingleObject(job_sem, 2) == WAIT_TIMEOUT) {
             if (nregions) sync_down();   /* the game also polls GPU-written values directly */
             continue;
@@ -317,8 +337,10 @@ static void STDMETHODCALLTYPE hk_update_tiles(ID3D12CommandQueue *q, ID3D12Resou
 
 static void STDMETHODCALLTYPE hk_execute(ID3D12CommandQueue *q, UINT n, ID3D12CommandList *const *lists)
 {
+    LONG64 t0 = slow_start();
     if (nregions) {
         sync_up();
+        slow_end("sync_up", t0);
         EnterCriticalSection(&signal_cs);
         EnterCriticalSection(&list_cs);
         for (UINT i = 0; i < n; i++) {
@@ -333,7 +355,9 @@ static void STDMETHODCALLTYPE hk_execute(ID3D12CommandQueue *q, UINT n, ID3D12Co
         LeaveCriticalSection(&list_cs);
         LeaveCriticalSection(&signal_cs);
     }
+    t0 = slow_start();
     ((execute_fn)queue_vt_orig[10])(q, n, lists);
+    slow_end("ExecuteCommandLists", t0);
 }
 
 static HRESULT STDMETHODCALLTYPE hk_signal(ID3D12CommandQueue *q, ID3D12Fence *fence, UINT64 value)
@@ -1154,7 +1178,7 @@ static volatile LONG64 n_unknown_pso;
 static void draw_stats(void)
 {
     LONG64 t = n_draw + n_drawidx + n_indirect;
-    if (t && (t & 0xffff) == 0)
+    if (t && (t & 0xffff) == 0 && !quiet)
         logmsg("draws: Draw %lld (start!=0 %lld) DrawIndexed %lld (base!=0 %lld, of which vertex_id PSO %lld, skipped %lld) "
                "ExecuteIndirect %lld; PSOs %ld (vertex_id %ld); filtered %lld; unknown-pso %lld",
                n_draw, n_draw_off, n_drawidx, n_drawidx_off, n_vid_base, n_vid_skipped, n_indirect, n_psos, n_vid_psos,
@@ -1331,7 +1355,9 @@ static HRESULT STDMETHODCALLTYPE hk_create_committed(ID3D12Device *dev, const D3
                                                      const D3D12_RESOURCE_DESC *desc, D3D12_RESOURCE_STATES st,
                                                      const D3D12_CLEAR_VALUE *cv, REFIID riid, void **ppv)
 {
+    LONG64 t0 = slow_start();
     HRESULT hr = ((create_committed_fn)dev_vt_orig[27])(dev, hp, f, desc, st, cv, riid, ppv);
+    slow_end("CreateCommittedResource", t0);
     if (SUCCEEDED(hr) && ppv) record_buffer(*ppv, desc);
     return hr;
 }
@@ -1352,7 +1378,9 @@ static HRESULT STDMETHODCALLTYPE hk_create_committed1(ID3D12Device *dev, const D
                                                       const D3D12_CLEAR_VALUE *cv, ID3D12ProtectedResourceSession *ps,
                                                       REFIID riid, void **ppv)
 {
+    LONG64 t0 = slow_start();
     HRESULT hr = ((create_committed1_fn)dev_vt_orig[53])(dev, hp, f, desc, st, cv, ps, riid, ppv);
+    slow_end("CreateCommittedResource1", t0);
     if (SUCCEEDED(hr) && ppv) record_buffer(*ppv, desc);
     return hr;
 }
@@ -1486,7 +1514,9 @@ static HRESULT STDMETHODCALLTYPE hk_create_gpso(ID3D12Device *dev, const D3D12_G
     const D3D12_GRAPHICS_PIPELINE_STATE_DESC *d = fix_layout(d0, &tmp, els, D3D12_IA_VERTEX_INPUT_STRUCTURE_ELEMENT_COUNT);
     census_layout(d0);
     {
+        LONG64 t0 = slow_start();
         HRESULT hr = ((create_gpso_fn)dev_vt_orig[10])(dev, d, riid, ppv);
+        slow_end("CreateGraphicsPipelineState", t0);
         if (SUCCEEDED(hr) && ppv && d) { note_pso(*ppv, &d->VS); build_tint(dev, *ppv, d); build_patched(dev, *ppv, d); }
         return hr;
     }
@@ -1507,6 +1537,7 @@ static HRESULT STDMETHODCALLTYPE hk_lib_load_gpso(ID3D12PipelineLibrary *lib, LP
     D3D12_INPUT_ELEMENT_DESC els[D3D12_IA_VERTEX_INPUT_STRUCTURE_ELEMENT_COUNT];
     const D3D12_GRAPHICS_PIPELINE_STATE_DESC *d = fix_layout(d0, &tmp, els, D3D12_IA_VERTEX_INPUT_STRUCTURE_ELEMENT_COUNT);
     HRESULT hr;
+    LONG64 t0 = slow_start();
     /* the library holds the PSO compiled from the original layout, so a fixed one
      * is compiled afresh instead of loaded */
     if (d != d0 && the_device) {
@@ -1514,6 +1545,7 @@ static HRESULT STDMETHODCALLTYPE hk_lib_load_gpso(ID3D12PipelineLibrary *lib, LP
         tmp.CachedPSO.CachedBlobSizeInBytes = 0;
         hr = ((create_gpso_fn)dev_vt_orig[10])(the_device, d, riid, ppv);
     } else hr = ((load_gpso_fn)lib_vt_orig[9])(lib, name, d0, riid, ppv);
+    slow_end(d != d0 ? "LoadGraphicsPipeline (recompiled)" : "LoadGraphicsPipeline", t0);
     if (SUCCEEDED(hr) && ppv && d) {
         census_layout(d0);
         note_pso(*ppv, &d->VS);
@@ -1671,7 +1703,9 @@ static HRESULT STDMETHODCALLTYPE hk_create_placed(ID3D12Device *dev, ID3D12Heap 
     ID3D12Resource *res = NULL;
     region *h = NULL, *g;
     uint8_t *ptr = NULL;
+    LONG64 t0 = slow_start();
     HRESULT hr = ((create_placed_fn)dev_vt_orig[29])(dev, heap, offset, desc, state, clear, riid, ppv);
+    slow_end("CreatePlacedResource", t0);
 
     if (FAILED(hr) || !ppv || !*ppv) return hr;
     record_buffer(*ppv, desc);
@@ -2310,6 +2344,127 @@ static DWORD WINAPI game_fixup_thread(void *arg)
     }
     logmsg("fiber fix: game image not found in 30 minutes");
     return 0;
+}
+
+/* ---------------- FlushProcessWriteBuffers ---------------- */
+
+/* Azimuth calls FlushProcessWriteBuffers from several threads, its worker very
+ * often. CrossOver's Wine implements it on macOS by walking task_threads and
+ * calling thread_get_register_pointer_values on every thread, with no lock.
+ * Under Rosetta two threads doing that at once end up waiting in thread_get_state
+ * on each other forever: in the hang the worker and 5 more threads all sit in
+ * NtFlushProcessWriteBuffers -> thread_get_state, the GPU is idle and the game
+ * stops presenting. kernel32 and kernelbase only forward it to ntdll, and the
+ * wrapper hands it to the game through GetProcAddress, so the hook sits in ntdll:
+ * the 32-byte syscall stub of NtFlushProcessWriteBuffers is copied out as the
+ * real call and its entry jumps to a wrapper that lets one thread through at a
+ * time. If the stub is not the expected one, only azimuth.exe's import is
+ * redirected (which misses the game's calls). All in memory. FH2_FLUSH=0 disables it,
+ * FH2_FLUSH=nolock keeps the wrapper for its timings but takes no lock;
+ * FH2_FLUSH=skip (diagnostic only, not safe) replaces the call with a local fence.
+ * Every 10 s the log gets the call count, the time spent in the real call and
+ * the time spent waiting for the lock (average and worst, in microseconds). */
+static void (WINAPI *real_flush)(void);
+static SRWLOCK flush_lock = SRWLOCK_INIT;
+static BOOL flush_nolock, flush_skip;
+static LARGE_INTEGER flush_freq;
+static LONG64 flush_calls, flush_busy, flush_busy_max, flush_wait, flush_wait_max, flush_report;
+
+static void flush_max(LONG64 *max, LONG64 v)
+{
+    LONG64 m;
+    while (v > (m = *max) && InterlockedCompareExchange64(max, v, m) != m) ;
+}
+
+static void WINAPI hk_flush(void)
+{
+    LARGE_INTEGER t0, t1, t2;
+    LONG64 report;
+    QueryPerformanceCounter(&t0);
+    if (!flush_nolock) AcquireSRWLockExclusive(&flush_lock);
+    QueryPerformanceCounter(&t1);
+    if (flush_skip) MemoryBarrier(); else real_flush();
+    QueryPerformanceCounter(&t2);
+    if (!flush_nolock) ReleaseSRWLockExclusive(&flush_lock);
+    InterlockedIncrement64(&flush_calls);
+    InterlockedAdd64(&flush_wait, t1.QuadPart - t0.QuadPart);
+    InterlockedAdd64(&flush_busy, t2.QuadPart - t1.QuadPart);
+    flush_max(&flush_wait_max, t1.QuadPart - t0.QuadPart);
+    flush_max(&flush_busy_max, t2.QuadPart - t1.QuadPart);
+    report = flush_report;
+    if (t2.QuadPart - report > flush_freq.QuadPart * 10 &&
+        InterlockedCompareExchange64(&flush_report, t2.QuadPart, report) == report) {
+        LONG64 n = InterlockedExchange64(&flush_calls, 0), us = flush_freq.QuadPart / 1000000;
+        LONG64 busy = InterlockedExchange64(&flush_busy, 0), busy_max = InterlockedExchange64(&flush_busy_max, 0);
+        LONG64 wait = InterlockedExchange64(&flush_wait, 0), wait_max = InterlockedExchange64(&flush_wait_max, 0);
+        if (n && us)
+            logmsg("flush: %lld calls in 10 s, call avg %lld us max %lld us, lock wait avg %lld us max %lld us",
+                   n, busy / n / us, busy_max / us, wait / n / us, wait_max / us);
+    }
+}
+
+/* Wine 11's x86_64 syscall stub; byte 4 (the syscall number) may differ:
+ *   mov r10,rcx; mov eax,N; test byte [0x7ffe0308],1; jne 1f; syscall; ret
+ *   1: jmp 2f; ret; 2: call [0x7ffe1000]; ret
+ * It holds no rip-relative operand, so a copy runs anywhere. */
+static const uint8_t nt_stub[32] = {
+    0x4c, 0x8b, 0xd1, 0xb8, 0x00, 0x00, 0x00, 0x00, 0xf6, 0x04, 0x25, 0x08, 0x03, 0xfe, 0x7f, 0x01,
+    0x75, 0x03, 0x0f, 0x05, 0xc3, 0xeb, 0x01, 0xc3, 0xff, 0x14, 0x25, 0x00, 0x10, 0xfe, 0x7f, 0xc3,
+};
+
+static BOOL hook_flush_ntdll(void)
+{
+    uint8_t *fn = (uint8_t *)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtFlushProcessWriteBuffers");
+    uint8_t *copy, jump[12] = {0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xe0};   /* mov rax, imm64; jmp rax */
+    uintptr_t target = (uintptr_t)hk_flush;
+    DWORD old;
+    if (!fn) return FALSE;
+    for (int i = 0; i < 32; i++)
+        if (i != 4 && fn[i] != nt_stub[i]) {
+            logmsg("FlushProcessWriteBuffers: ntdll stub differs at byte %d (%02x), not hooked there", i, fn[i]);
+            return FALSE;
+        }
+    if (!(copy = VirtualAlloc(NULL, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE))) return FALSE;
+    memcpy(copy, fn, 32);
+    real_flush = (void (WINAPI *)(void))copy;
+    QueryPerformanceFrequency(&flush_freq);
+    memcpy(jump + 2, &target, 8);
+    if (!VirtualProtect(fn, sizeof(jump), PAGE_EXECUTE_READWRITE, &old)) return FALSE;
+    memcpy(fn, jump, sizeof(jump));
+    VirtualProtect(fn, sizeof(jump), old, &old);
+    FlushInstructionCache(GetCurrentProcess(), fn, sizeof(jump));
+    logmsg("FlushProcessWriteBuffers: ntdll's NtFlushProcessWriteBuffers %s",
+           flush_skip ? "SKIPPED (diagnostic)" : flush_nolock ? "timed, not serialized" : "serialized for every caller");
+    return TRUE;
+}
+
+static BOOL hook_flush(HMODULE exe)
+{
+    uint8_t *base = (uint8_t *)exe;
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+    IMAGE_DATA_DIRECTORY *dir = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    IMAGE_IMPORT_DESCRIPTOR *imp;
+    if (!dir->VirtualAddress) return FALSE;
+    real_flush = (void (WINAPI *)(void))GetProcAddress(GetModuleHandleA("kernel32.dll"), "FlushProcessWriteBuffers");
+    if (!real_flush) return FALSE;
+    QueryPerformanceFrequency(&flush_freq);
+    for (imp = (IMAGE_IMPORT_DESCRIPTOR *)(base + dir->VirtualAddress); imp->Name; imp++) {
+        IMAGE_THUNK_DATA *names = (IMAGE_THUNK_DATA *)(base + (imp->OriginalFirstThunk ? imp->OriginalFirstThunk : imp->FirstThunk));
+        IMAGE_THUNK_DATA *slots = (IMAGE_THUNK_DATA *)(base + imp->FirstThunk);
+        for (; names->u1.AddressOfData; names++, slots++) {
+            DWORD old;
+            if (IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal)) continue;
+            if (strcmp((const char *)((IMAGE_IMPORT_BY_NAME *)(base + names->u1.AddressOfData))->Name,
+                       "FlushProcessWriteBuffers")) continue;
+            if (!VirtualProtect(&slots->u1.Function, sizeof(slots->u1.Function), PAGE_READWRITE, &old)) return FALSE;
+            slots->u1.Function = (ULONG_PTR)hk_flush;
+            VirtualProtect(&slots->u1.Function, sizeof(slots->u1.Function), old, &old);
+            logmsg("FlushProcessWriteBuffers: %s's import %s", (const char *)(base + imp->Name),
+                   flush_skip ? "SKIPPED (diagnostic)" : flush_nolock ? "timed, not serialized" : "serialized");
+            return TRUE;
+        }
+    }
+    return FALSE;
 }
 
 /* ---------------- exports ---------------- */
@@ -3769,6 +3924,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
     if (reason != DLL_PROCESS_ATTACH) return TRUE;
     DisableThreadLibraryCalls(inst);
     InitializeCriticalSection(&log_cs);
+    QueryPerformanceFrequency(&slow_freq);
     InitializeCriticalSection(&job_cs);
     InitializeCriticalSection(&signal_cs);
     InitializeCriticalSection(&list_cs);
@@ -3800,6 +3956,8 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
         logmsg("per-PSO draw counting: %s", count_on ? "on" : "off");
         tint_build = GetEnvironmentVariableA("FH2_TINT", v, sizeof(v)) && v[0] == '1';
         fix_append = !(GetEnvironmentVariableA("FH2_APPEND", v, sizeof(v)) && v[0] == '0');
+        quiet = GetEnvironmentVariableA("FH2_QUIET", v, sizeof(v)) && v[0] == '1';
+        if (quiet) logmsg("quiet: no periodic log lines, control file not polled");
         {
             char lv[32] = "";
             if (GetEnvironmentVariableA("FH2_LABEL", lv, sizeof(lv))) {
@@ -3829,6 +3987,11 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
             AddVectoredExceptionHandler(1, fiber_fault_handler);
             CloseHandle(CreateThread(NULL, 0, game_fixup_thread, NULL, 0, NULL));
         }
+        flush_nolock = GetEnvironmentVariableA("FH2_FLUSH", v, sizeof(v)) && !strcmp(v, "nolock");
+        flush_skip = GetEnvironmentVariableA("FH2_FLUSH", v, sizeof(v)) && !strcmp(v, "skip");
+        if (!(GetEnvironmentVariableA("FH2_FLUSH", v, sizeof(v)) && v[0] == '0') && GetModuleHandleA("azimuth.exe") &&
+            !hook_flush_ntdll() && !hook_flush(GetModuleHandleA("azimuth.exe")))
+            logmsg("FlushProcessWriteBuffers: azimuth.exe's import not found, left alone");
     }
     logmsg("fh2port d3d12 proxy loaded, real d3d12 %p", real);
     return real_create_device && real_get_debug_interface && real_serialize_rs;

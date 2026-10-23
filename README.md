@@ -32,6 +32,10 @@ GPTK 4.0b3. Free roam, races, menus, audio, controllers and keyboard work.
 
 ### What's new
 
+- **0.1.5**: fixes the **random freeze** (no Present, Azimuth's watchdog reporting its worker stuck)
+  seen after anything from 1 to 30 minutes, in the intro movie or in game. Wine on macOS implements
+  `FlushProcessWriteBuffers` by reading every thread's registers; under Rosetta two threads doing
+  that at once wait on each other forever. The layer now lets one call through at a time.
 - **0.1.4**: the launcher also finds **CrossOver Preview**. The install steps no longer tell you to
   start `azimuth.exe` from CrossOver first: without the layer it stops with heap / DX12 errors
   before it asks for the game folder. Open FH2 Port instead; Azimuth then asks for the folder.
@@ -46,6 +50,7 @@ GPTK 4.0b3. Free roam, races, menus, audio, controllers and keyboard work.
 | `WriteBufferImmediate` does nothing | Replayed on the CPU before the fence, or turned into a copy from an upload ring |
 | Azimuth only starts on devices that report existing heaps and resource binding tier 3 | Both reported as supported (existing heaps are the emulation above) |
 | Tiled resources do not alias | Reported as unsupported, so Azimuth takes another path |
+| `FlushProcessWriteBuffers` (Wine on macOS reads every thread's registers) deadlocks under Rosetta when two threads call it at once | ntdll's `NtFlushProcessWriteBuffers` is hooked in memory and lets one caller through at a time |
 | **Input layouts using `D3D12_APPEND_ALIGNED_ELEMENT` over several vertex buffers get wrong offsets.** In the world-prop layout `I_YAXIS` is fetched 28 bytes and `I_COLOUR` 56 bytes past their real position | Offsets are written out per slot before the layout reaches D3DMetal. This fixes the giant "phantom walls", black or upside-down trees, bent poles and misaligned barriers |
 
 The input-layout bug has a standalone repro, `layout_test` in `src/d3d12/d3d12.c`, run by
@@ -114,8 +119,11 @@ Keys count only while the game window has focus; keyboard and controllers work t
 - **Hang / GPU reset crash**: the game can stop waiting for a value the GPU should have written
   (Azimuth's "the GPU passed the work that writes the value … and the value is not there", or its
   watchdog reporting its worker stuck). Before 0.1.1 this happened after 8–20 minutes: the layer
-  lost the immediate writes of command lists once more than 4096 lists had been created. Since
-  that fix a 31-minute session ran clean; please report it if it still happens.
+  lost the immediate writes of command lists once more than 4096 lists had been created. The
+  remaining freezes were the `FlushProcessWriteBuffers` deadlock fixed in 0.1.5; please report it
+  if it still happens, with `azimuth.log` and `fh2port.log`.
+- **Stutter** in busy places (for example the buildings around Place Masséna in Nice): the game's
+  own threads run out of CPU time there under Rosetta; the GPU and the layer are not the limit.
 - MSAA must stay off. The intro movies play (no intro skip).
 
 ### Debugging
@@ -125,7 +133,9 @@ Logs are in `data/logs` of the Azimuth folder (`fh2port.log`, `fh2pad.log`, `azi
 `FH2_TINT=1` (magenta twins of instanced PSOs for live bisection), `FH2_APPEND=0` (layouts passed
 through unfixed), `FH2_FIBER=0`, `FH2_TILED=1`, `FH2_SKIP_EI=1`, `FH2_SKIP_VID=1`, `FH2_PATCH=…`,
 `FH2_LABEL=<address>` (traces the values written to that address through record, execute, signal
-and completion). Live commands go through `data/logs/fh2port.ctl` (`top`, `reset`, `dump N`,
+and completion), `FH2_FLUSH=0|nolock|skip` (flush fix off / timed without the lock / replaced by a
+local fence, diagnostic only), `FH2_QUIET=1` (no periodic log lines, control file not polled).
+Calls into D3DMetal slower than 4 ms are logged as `slow:`. Live commands go through `data/logs/fh2port.ctl` (`top`, `reset`, `dump N`,
 `tint …`, `tintlist`, `tintset …`, `watch …`, `patch on|off`, `stacks` for the Windows-side call
 stack of every thread, useful when the game hangs).
 
@@ -152,6 +162,10 @@ Sviluppato e provato su MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver su Win
 
 ### Novità
 
+- **0.1.5**: corregge il **blocco casuale** (nessun Present, il watchdog di Azimuth segnala il
+  worker fermo) che arrivava dopo 1–30 minuti, nel filmato iniziale o in gioco. Wine su macOS
+  implementa `FlushProcessWriteBuffers` leggendo i registri di ogni thread; sotto Rosetta due thread
+  che lo fanno insieme si aspettano a vicenda per sempre. Ora il layer fa passare una chiamata alla volta.
 - **0.1.4**: il launcher trova anche **CrossOver Preview**. I passi di installazione non dicono più
   di avviare prima `azimuth.exe` da CrossOver: senza il layer si ferma con errori heap / DX12 prima
   di chiedere la cartella del gioco. Apri invece FH2 Port; poi Azimuth chiede la cartella.
@@ -166,6 +180,7 @@ Sviluppato e provato su MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver su Win
 | `WriteBufferImmediate` non fa nulla | Rieseguito sulla CPU prima del fence, oppure trasformato in una copia da un buffer di upload |
 | Azimuth parte solo se il device dichiara existing heaps e resource binding tier 3 | Entrambi dichiarati supportati (gli existing heaps sono l'emulazione qui sopra) |
 | Le tiled resource non fanno aliasing | Dichiarate non supportate, così Azimuth usa un'altra strada |
+| `FlushProcessWriteBuffers` (Wine su macOS legge i registri di ogni thread) si blocca sotto Rosetta se due thread la chiamano insieme | `NtFlushProcessWriteBuffers` di ntdll è agganciata in memoria e fa passare un chiamante alla volta |
 | **I layout con `D3D12_APPEND_ALIGNED_ELEMENT` su più vertex buffer ricevono offset sbagliati.** Nel layout degli oggetti del mondo `I_YAXIS` viene letto 28 byte e `I_COLOUR` 56 byte più avanti | Gli offset vengono scritti per ogni slot prima di passare il layout a D3DMetal. Questo corregge i "muri fantasma" giganti, gli alberi neri o capovolti, i pali storti e le sponde disallineate |
 
 Il bug dei layout ha una riproduzione autonoma, `layout_test` in `src/d3d12/d3d12.c`, eseguita da
@@ -227,8 +242,11 @@ insieme. `FH2_KEYBOARD=0` lascia i gamepad di Wine come sono.
   avrebbe dovuto scrivere ("the GPU passed the work that writes the value … and the value is not
   there" di Azimuth, oppure il suo watchdog che segnala il worker bloccato). Prima della 0.1.1
   succedeva dopo 8–20 minuti: il layer perdeva le scritture immediate delle command list dopo che
-  ne erano state create più di 4096. Dopo quella correzione una sessione di 31 minuti è andata
-  liscia; se succede ancora, segnalalo.
+  ne erano state create più di 4096. I blocchi rimasti erano lo stallo di
+  `FlushProcessWriteBuffers` corretto nella 0.1.5; se succede ancora, segnalalo con `azimuth.log` e
+  `fh2port.log`.
+- **Scatti** nei punti affollati (per esempio i palazzi intorno a Place Masséna a Nizza): lì i thread
+  del gioco sotto Rosetta non hanno abbastanza CPU; né la GPU né il layer sono il limite.
 - L'MSAA va lasciato spento. I filmati iniziali vengono riprodotti (niente salto dell'intro).
 
 ### Licenza
