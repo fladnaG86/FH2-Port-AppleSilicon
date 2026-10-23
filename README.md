@@ -32,7 +32,7 @@ GPTK 4.0b3. Free roam, races, menus, audio, controllers and keyboard work.
 
 ### What's new
 
-- **Next release (in `main`)**: about **half the stutter** in busy places. Wine on macOS runs threads
+- **0.1.6**: about **half the stutter** in busy places. Wine on macOS runs threads
   of normal Windows priority below native apps (Mach priority 26 instead of 31), and Azimuth's
   worker and many game threads sit there; the layer now raises them to the native level.
 - **0.1.5**: fixes the **random freeze** (no Present, Azimuth's watchdog reporting its worker stuck)
@@ -128,7 +128,7 @@ Keys count only while the game window has focus; keyboard and controllers work t
   if it still happens, with `azimuth.log` and `fh2port.log`.
 - **Stutter** in busy places (for example the buildings around Place Masséna in Nice): the game's
   own threads run out of CPU time there under Rosetta; the GPU and the layer are not the limit.
-  Raising thread priorities (in `main`) halves it; what is left is Rosetta's limit.
+  Raising thread priorities (0.1.6) halves it; what is left is Rosetta's limit.
 - MSAA must stay off. The intro movies play (no intro skip).
 
 ### Debugging
@@ -168,7 +168,7 @@ Sviluppato e provato su MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver su Win
 
 ### Novità
 
-- **Prossima release (in `main`)**: circa **metà degli scatti** nei punti affollati. Wine su macOS
+- **0.1.6**: circa **metà degli scatti** nei punti affollati. Wine su macOS
   fa girare i thread a priorità normale di Windows sotto le app native (priorità Mach 26 invece di
   31), e lì stanno il worker di Azimuth e molti thread del gioco; ora il layer li porta al livello nativo.
 - **0.1.5**: corregge il **blocco casuale** (nessun Present, il watchdog di Azimuth segnala il
@@ -257,7 +257,7 @@ insieme. `FH2_KEYBOARD=0` lascia i gamepad di Wine come sono.
   `fh2port.log`.
 - **Scatti** nei punti affollati (per esempio i palazzi intorno a Place Masséna a Nizza): lì i thread
   del gioco sotto Rosetta non hanno abbastanza CPU; né la GPU né il layer sono il limite.
-  Alzare la priorità dei thread (in `main`) li dimezza; quel che resta è il limite di Rosetta.
+  Alzare la priorità dei thread (0.1.6) li dimezza; quel che resta è il limite di Rosetta.
 - L'MSAA va lasciato spento. I filmati iniziali vengono riprodotti (niente salto dell'intro).
 
 ### Licenza
