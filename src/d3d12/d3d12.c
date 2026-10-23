@@ -2172,21 +2172,37 @@ static void hook_device(void *device)
 
 /* ---------------- game fix-up in memory ---------------- */
 
-/* The game (Forza Horizon 2 1.0.0.64) reads the current fiber inline with
- * "mov REG, gs:[0x20]". On macOS Wine gs does not point at the TEB except for a
- * few slots, and that read returns a Mach port number, so the game crashes in its
- * job system. Each of the 12 sites is rerouted, in memory only, to a small cave in
- * the .text padding that reads the TEB through its self pointer:
+/* The game reads the current fiber inline with "mov REG, gs:[0x20]". On macOS
+ * Wine gs does not point at the TEB except for a few slots, and that read
+ * returns a Mach port number (or 0), so the game crashes in its job system.
+ * Each site is rerouted, in memory only, to a small cave in the .text padding
+ * that reads the TEB through its self pointer:
  *     mov REG, gs:[0x30]; mov REG, [REG+0x20]; ret
  * The game file on disk stays untouched. A thread looks for the game image (by
  * its PE timestamp and size) once the wrapper has mapped it, and patches it only
- * if every site still holds the original instruction. FH2_FIBER=0 disables it. */
-#define GAME_TIMESTAMP 0x565501edu
-#define GAME_IMAGE_SIZE 0x3a18000u
+ * if every site still holds the original instruction. FH2_FIBER=0 disables it.
+ *
+ * Two titles ship the same engine: the base game and The Fast & Furious
+ * standalone, whose sites all sit 0x261e0 later in its image. The timestamp and
+ * size pick the entry, and the shifted sites must still hold the original
+ * instruction, so an entry that does not match its image patches nothing. */
+struct game_image {
+    DWORD timestamp, size;
+    const char *name;
+    DWORD shift;          /* added to every site's rva */
+};
+
+static const struct game_image known_images[] = {
+    {0x565501edu, 0x3a18000u, "Forza Horizon 2 1.0.0.64", 0},
+    {0x55b62fdeu, 0x3a89000u, "Forza Horizon 2 Presents Fast & Furious 1.0.0.6", 0x261e0},
+};
+
 static const struct { DWORD rva; uint8_t reg; } fiber_sites[] = {
     {0x1082a00, 0}, {0x1082a17, 0}, {0x1086960, 0}, {0x1086977, 0}, {0x10876b0, 9}, {0x1087758, 10},
     {0x1087c40, 0}, {0x1087c57, 0}, {0x1088420, 0}, {0x108843b, 0}, {0x10887c6, 0}, {0x10887e0, 0},
 };
+
+static size_t fiber_site_count(void) { return sizeof(fiber_sites) / sizeof(fiber_sites[0]); }
 
 /* the 9 bytes of "mov REG, gs:[0x20]" for rax, r9 and r10 */
 static void fiber_read_bytes(uint8_t reg, uint8_t out[9])
@@ -2208,7 +2224,8 @@ static BOOL safe_read(const void *src, void *dst, SIZE_T n)
     return ReadProcessMemory(GetCurrentProcess(), src, dst, n, &got) && got == n;
 }
 
-static uint8_t *find_game_image(void)
+/* the game image the wrapper mapped, if it is one this layer knows */
+static uint8_t *find_game_image(const struct game_image **which)
 {
     MEMORY_BASIC_INFORMATION mi;
     for (uint8_t *p = (uint8_t *)0x10000; VirtualQuery(p, &mi, sizeof(mi)) == sizeof(mi); p = (uint8_t *)mi.BaseAddress + mi.RegionSize) {
@@ -2219,36 +2236,43 @@ static uint8_t *find_game_image(void)
         if (!safe_read(mi.BaseAddress, &dos, sizeof(dos)) || dos.e_magic != IMAGE_DOS_SIGNATURE ||
             dos.e_lfanew <= 0 || dos.e_lfanew > 0x800)
             continue;
-        if (safe_read((const uint8_t *)mi.BaseAddress + dos.e_lfanew, &nt, sizeof(nt)) && nt.Signature == IMAGE_NT_SIGNATURE &&
-            nt.FileHeader.TimeDateStamp == GAME_TIMESTAMP && nt.OptionalHeader.SizeOfImage == GAME_IMAGE_SIZE)
-            return (uint8_t *)mi.BaseAddress;
+        if (!safe_read((const uint8_t *)mi.BaseAddress + dos.e_lfanew, &nt, sizeof(nt)) || nt.Signature != IMAGE_NT_SIGNATURE)
+            continue;
+        for (size_t i = 0; i < sizeof(known_images) / sizeof(known_images[0]); i++) {
+            if (nt.FileHeader.TimeDateStamp == known_images[i].timestamp && nt.OptionalHeader.SizeOfImage == known_images[i].size) {
+                *which = &known_images[i];
+                return (uint8_t *)mi.BaseAddress;
+            }
+        }
     }
     return NULL;
 }
 
 /* TRUE once every site holds the original instruction: the wrapper writes the
  * headers first and the sections a little later */
-static BOOL fiber_sites_ready(const uint8_t *game)
+static BOOL fiber_sites_ready(const uint8_t *game, const struct game_image *which)
 {
     uint8_t want[9], have[9];
-    for (size_t i = 0; i < sizeof(fiber_sites) / sizeof(fiber_sites[0]); i++) {
+    for (size_t i = 0; i < fiber_site_count(); i++) {
         fiber_read_bytes(fiber_sites[i].reg, want);
-        if (!safe_read(game + fiber_sites[i].rva, have, 9) || memcmp(have, want, 9)) return FALSE;
+        if (!safe_read(game + fiber_sites[i].rva + which->shift, have, 9) || memcmp(have, want, 9)) return FALSE;
     }
     return TRUE;
 }
 
 static volatile LONG fiber_patched;
 static uint8_t *volatile fiber_game;
+static const struct game_image *volatile fiber_image;
 
-static BOOL patch_fiber_reads(uint8_t *game)
+static BOOL patch_fiber_reads(uint8_t *game, const struct game_image *which)
 {
     uint8_t *caves[11] = {0}, *o;
+    DWORD first = fiber_sites[0].rva + which->shift;
     if (InterlockedCompareExchange(&fiber_patched, 1, 0)) return TRUE;   /* once: thread or exception handler */
     DWORD old;
-    size_t n = sizeof(fiber_sites) / sizeof(fiber_sites[0]);
+    size_t n = fiber_site_count();
     /* caves: 16-byte runs of int3 padding after the first site, one per register */
-    o = game + ((fiber_sites[0].rva + 15) & ~15u);
+    o = game + ((first + 15) & ~15u);
     for (size_t i = 0; i < n; i++) {
         uint8_t reg = fiber_sites[i].reg, r = reg >= 8;
         uint8_t cave[14] = {0x65, (uint8_t)(0x48 | r << 2), 0x8b, (uint8_t)(0x04 | (reg & 7) << 3), 0x25, 0x30, 0, 0, 0,
@@ -2258,7 +2282,7 @@ static BOOL patch_fiber_reads(uint8_t *game)
         if (caves[reg]) continue;
         while (memcmp(o, pad, 16)) {
             o += 16;
-            if (o > game + fiber_sites[0].rva + 0x100000) { logmsg("fiber fix: no padding for a cave"); return FALSE; }
+            if (o > game + first + 0x100000) { logmsg("fiber fix: no padding for a cave"); return FALSE; }
         }
         if (!VirtualProtect(o, 16, PAGE_EXECUTE_READWRITE, &old)) return FALSE;
         memcpy(o, cave, sizeof(cave));
@@ -2267,7 +2291,7 @@ static BOOL patch_fiber_reads(uint8_t *game)
         o += 16;
     }
     for (size_t i = 0; i < n; i++) {
-        uint8_t *site = game + fiber_sites[i].rva, code[9];
+        uint8_t *site = game + fiber_sites[i].rva + which->shift, code[9];
         int32_t rel = (int32_t)(caves[fiber_sites[i].reg] - (site + 5));
         code[0] = 0xe8;
         memcpy(code + 1, &rel, 4);
@@ -2276,8 +2300,8 @@ static BOOL patch_fiber_reads(uint8_t *game)
         memcpy(site, code, 9);
         VirtualProtect(site, 9, old, &old);
     }
-    FlushInstructionCache(GetCurrentProcess(), game, GAME_IMAGE_SIZE);
-    logmsg("fiber fix: %zu inline fiber reads rerouted in the game image at %p", n, game);
+    FlushInstructionCache(GetCurrentProcess(), game, which->size);
+    logmsg("fiber fix: %zu inline fiber reads rerouted in the game image at %p (%s)", n, game, which->name);
     return TRUE;
 }
 
@@ -2294,6 +2318,7 @@ static LONG WINAPI fiber_fault_handler(EXCEPTION_POINTERS *ep)
                        &c->R9, &c->R10, &c->R11, &c->R12, &c->R13, &c->R14, &c->R15};
     DWORD64 bad, good, addr;
     uint8_t *game = fiber_game;
+    const struct game_image *which = fiber_image;
     int fixed = 0;
     if (er->ExceptionCode != EXCEPTION_ACCESS_VIOLATION || er->NumberParameters < 2) return EXCEPTION_CONTINUE_SEARCH;
     /* cheap checks first: other access violations must not pay for the image search */
@@ -2301,13 +2326,14 @@ static LONG WINAPI fiber_fault_handler(EXCEPTION_POINTERS *ep)
     good = (DWORD64)(uintptr_t)((NT_TIB *)NtCurrentTeb())->FiberData;
     addr = er->ExceptionInformation[1];
     if (bad == good || addr < bad || addr >= bad + 0x1000) return EXCEPTION_CONTINUE_SEARCH;
-    if (!game && !(game = find_game_image())) return EXCEPTION_CONTINUE_SEARCH;
-    if (c->Rip < (DWORD64)(uintptr_t)game || c->Rip >= (DWORD64)(uintptr_t)game + GAME_IMAGE_SIZE) return EXCEPTION_CONTINUE_SEARCH;
+    if (!game && !(game = find_game_image(&which))) return EXCEPTION_CONTINUE_SEARCH;
+    if (c->Rip < (DWORD64)(uintptr_t)game || c->Rip >= (DWORD64)(uintptr_t)game + which->size) return EXCEPTION_CONTINUE_SEARCH;
     for (size_t i = 0; i < sizeof(regs) / sizeof(regs[0]); i++)
         if (*regs[i] == bad) { *regs[i] = good; fixed++; }
     if (!fixed) return EXCEPTION_CONTINUE_SEARCH;
     fiber_game = game;
-    if (fiber_sites_ready(game)) patch_fiber_reads(game);
+    fiber_image = which;
+    if (fiber_sites_ready(game, which)) patch_fiber_reads(game, which);
     logmsg("fiber fix: caught a fiber read before the patch at game+%#llx, %d register(s) corrected",
            (unsigned long long)(c->Rip - (DWORD64)(uintptr_t)game), fixed);
     return EXCEPTION_CONTINUE_EXECUTION;
@@ -2318,23 +2344,25 @@ static DWORD WINAPI game_fixup_thread(void *arg)
     DWORD start = GetTickCount();
     (void)arg;
     uint8_t *game = NULL;
+    const struct game_image *which = NULL;
     DWORD found = 0;
     /* the launcher can stay open for minutes before the game is mapped */
     while (GetTickCount() - start < 1800000) {
         if (fiber_patched) return 0;   /* the exception handler got there first */
-        if (!game && (game = find_game_image())) {
+        if (!game && (game = find_game_image(&which))) {
             fiber_game = game;
+            fiber_image = which;
             found = GetTickCount();
-            logmsg("game image found at %p after %lu ms", game, found - start);
+            logmsg("game image found at %p after %lu ms (%s)", game, found - start, which->name);
         }
         if (game) {
-            if (fiber_sites_ready(game)) {
+            if (fiber_sites_ready(game, which)) {
                 logmsg("game code in place %lu ms after its headers", GetTickCount() - found);
-                patch_fiber_reads(game);
+                patch_fiber_reads(game, which);
                 return 0;
             }
             if (GetTickCount() - found > 60000) {
-                logmsg("fiber fix: the sites never held the expected instructions, game left alone");
+                logmsg("fiber fix: the sites never held the expected instructions, game left alone (%s)", which->name);
                 return 0;
             }
             Sleep(0);   /* the code arrives within a few ms of the headers: poll tightly */

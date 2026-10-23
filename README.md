@@ -65,6 +65,11 @@ The game itself also needs one fix on macOS Wine: it reads the current fiber inl
 `mov reg, gs:[0x20]`, which does not reach the TEB there. The layer reroutes those 12 reads **in
 memory**, after Azimuth has loaded the game; the game files on disk stay untouched.
 
+The same fix covers **Forza Horizon 2 Presents Fast & Furious** (`Spire_1.0.0.6`): the same
+engine, with all twelve sites `0x261e0` later in its image. The layer recognises the image by its PE
+timestamp and size and shifts the sites for it, and each site must still hold the original
+instruction before anything is written, so an unknown build is left alone.
+
 ### Install with the app
 
 1. In CrossOver (or CrossOver Preview) create a **Windows 10 64-bit** bottle and copy the Azimuth
@@ -200,6 +205,12 @@ offset espliciti 0 su 17.
 Anche il gioco ha bisogno di una correzione su Wine per macOS: legge la fiber corrente con
 `mov reg, gs:[0x20]`, che lì non arriva al TEB. Il layer reindirizza quelle 12 letture **in
 memoria**, dopo che Azimuth ha caricato il gioco; i file del gioco su disco restano intatti.
+
+La stessa correzione vale per **Forza Horizon 2 Presents Fast & Furious**
+(`Spire_1.0.0.6`): stesso motore, con tutti e dodici i punti `0x261e0` più avanti nella sua
+immagine. Il layer riconosce l'immagine dal timestamp e dalla dimensione del PE e sposta i punti,
+e ogni punto deve contenere ancora l'istruzione originale prima di scrivere, quindi una build
+sconosciuta resta intatta.
 
 ### Installazione con l'app
 
