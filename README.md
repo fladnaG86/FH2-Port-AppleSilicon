@@ -78,8 +78,19 @@ The input-layout bug has a standalone repro, `layout_test` in `src/d3d12/d3d12.c
 explicit offsets 0 of 17.
 
 The game itself also needs one fix on macOS Wine: it reads the current fiber inline with
-`mov reg, gs:[0x20]`, which does not reach the TEB there. The layer reroutes those 12 reads **in
+`mov reg, gs:[0x20]`, which does not reach the TEB there. The layer reroutes those reads **in
 memory**, after Azimuth has loaded the game; the game files on disk stay untouched.
+
+It is not only Forza Horizon 2: the same read is in **Forza Horizon 2 Presents Fast & Furious**
+(`Spire_1.0.0.6`), **Forza Horizon 3** (`Opus_1.0.125.0`), **Forza Motorsport 5**
+(`Forza_1.0.0.20`, two hundred of them) and **Forza Motorsport 6** (`Monument_1.0.0.44`), and each
+build puts them at different addresses with different registers. So the layer knows a title only by
+its PE timestamp and image size, and finds the sites itself: it scans the game image's executable
+sections for `65 REX.W 8b modrm(SIB) 25 20 00 00 00`, patches what it finds into a jump to a cave in
+that section's `int3` padding (one cave per register), and patches the rest as more of the image
+arrives. In the log: `game image found at … (Forza Horizon 3 1.0.125.0)` and
+`fiber fix: 12 inline fiber reads rerouted … (…)`. An unidentified build is left alone, and a new
+title costs two numbers in `known_images[]` — its timestamp and image size.
 
 ### Install with the app
 
@@ -264,8 +275,19 @@ Il bug dei layout ha una riproduzione autonoma, `layout_test` in `src/d3d12/d3d1
 offset espliciti 0 su 17.
 
 Anche il gioco ha bisogno di una correzione su Wine per macOS: legge la fiber corrente con
-`mov reg, gs:[0x20]`, che lì non arriva al TEB. Il layer reindirizza quelle 12 letture **in
+`mov reg, gs:[0x20]`, che lì non arriva al TEB. Il layer reindirizza quelle letture **in
 memoria**, dopo che Azimuth ha caricato il gioco; i file del gioco su disco restano intatti.
+
+Non è solo Forza Horizon 2: la stessa lettura è in **Forza Horizon 2 Presents Fast & Furious**
+(`Spire_1.0.0.6`), **Forza Horizon 3** (`Opus_1.0.125.0`), **Forza Motorsport 5**
+(`Forza_1.0.0.20`, duecento letture) e **Forza Motorsport 6** (`Monument_1.0.0.44`), e ogni build le
+mette ad indirizzi e in registri diversi. Il layer riconosce quindi un titolo solo dal timestamp PE e
+dalla dimensione dell'immagine, e trova i punti da solo: scansiona le sezioni eseguibili
+dell'immagine del gioco cercando `65 REX.W 8b modrm(SIB) 25 20 00 00 00`, trasforma quelli che trova
+in un salto a una cave nel padding `int3` della sezione (una cave per registro) e sistema il resto
+man mano che l'immagine arriva. Nel log: `game image found at … (Forza Horizon 3 1.0.125.0)` e
+`fiber fix: 12 inline fiber reads rerouted … (…)`. Una build non riconosciuta resta intatta, e un
+titolo nuovo costa due numeri in `known_images[]`: il suo timestamp e la dimensione dell'immagine.
 
 ### Installazione con l'app
 
