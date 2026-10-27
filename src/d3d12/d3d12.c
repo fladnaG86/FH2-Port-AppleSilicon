@@ -168,8 +168,6 @@ typedef struct {
 #define LIST_GONE ((void *)1)   /* tombstone: keeps probe chains intact */
 static list_writes list_table[LIST_TABLE];
 static CRITICAL_SECTION list_cs;
-static imm_write *staged;
-static UINT nstaged, capstaged;
 
 /* label watch: the wrapper stops with "the GPU passed the work that writes the
  * value N at <address> and the value is not there". FH2_LABEL=<hex address> logs
@@ -261,29 +259,52 @@ typedef struct job {
     UINT64 value;
 } job;
 
-static job *job_head, *job_tail;
-static CRITICAL_SECTION job_cs;
-static HANDLE job_sem;
+/* Each hooked queue has its own fence, job list, staged writes and worker thread.
+ * Azimuth 1.0 drives two queues at once: with one shared fence their values
+ * interleaved, and one FIFO worker could wait on queue B's GPU work while B
+ * waited on a fence only a later job of queue A would signal. */
+#define MAX_QUEUES 8
+typedef struct {
+    ID3D12CommandQueue *q;
+    ID3D12Fence *fence;          /* ours, signalled by this queue only */
+    volatile LONG64 value;
+    job *head, *tail;
+    CRITICAL_SECTION cs;         /* job list */
+    CRITICAL_SECTION signal_cs;  /* keeps job order == this queue's GPU order */
+    HANDLE sem;
+    imm_write *staged;
+    UINT nstaged, capstaged;
+} qstate;
+static qstate qstates[MAX_QUEUES];
+static volatile LONG nqueues;
+
+static qstate *find_qstate(ID3D12CommandQueue *q)
+{
+    for (LONG i = 0; i < nqueues; i++)
+        if (qstates[i].q == q) return &qstates[i];
+    return NULL;
+}
 
 static void poll_control(void);
 
 static DWORD WINAPI signal_worker(void *arg)
 {
+    qstate *qs = arg;
+    BOOL first = qs == &qstates[0];   /* the first queue's worker also does the idle duties */
     HANDLE ev = CreateEventA(NULL, FALSE, FALSE, NULL);
-    (void)arg;
     for (;;) {
         job *j;
         static DWORD last_poll;
-        if (!quiet && GetTickCount() - last_poll > 500) { last_poll = GetTickCount(); poll_control(); }
-        if (WaitForSingleObject(job_sem, 2) == WAIT_TIMEOUT) {
-            if (nregions) sync_down();   /* the game also polls GPU-written values directly */
+        if (first && !quiet && GetTickCount() - last_poll > 500) { last_poll = GetTickCount(); poll_control(); }
+        if (WaitForSingleObject(qs->sem, 2) == WAIT_TIMEOUT) {
+            if (first && nregions) sync_down();   /* the game also polls GPU-written values directly */
             continue;
         }
-        EnterCriticalSection(&job_cs);
-        j = job_head;
-        job_head = j->next;
-        if (!job_head) job_tail = NULL;
-        LeaveCriticalSection(&job_cs);
+        EnterCriticalSection(&qs->cs);
+        j = qs->head;
+        qs->head = j->next;
+        if (!qs->head) qs->tail = NULL;
+        LeaveCriticalSection(&qs->cs);
 
         if (ID3D12Fence_GetCompletedValue(j->gpu_fence) < j->gpu_value) {
             ID3D12Fence_SetEventOnCompletion(j->gpu_fence, j->gpu_value, ev);
@@ -316,9 +337,6 @@ typedef HRESULT (STDMETHODCALLTYPE *signal_fn)(ID3D12CommandQueue *, ID3D12Fence
 
 static void **queue_vt_orig;
 static void *queue_vt[QUEUE_SLOTS];
-static ID3D12Fence *queue_fence;
-static volatile LONG64 queue_fence_value;
-static CRITICAL_SECTION signal_cs;
 
 typedef void (STDMETHODCALLTYPE *update_tiles_fn)(ID3D12CommandQueue *, ID3D12Resource *, UINT,
                                                   const D3D12_TILED_RESOURCE_COORDINATE *, const D3D12_TILE_REGION_SIZE *,
@@ -338,14 +356,15 @@ static void STDMETHODCALLTYPE hk_update_tiles(ID3D12CommandQueue *q, ID3D12Resou
 static void STDMETHODCALLTYPE hk_execute(ID3D12CommandQueue *q, UINT n, ID3D12CommandList *const *lists)
 {
     LONG64 t0 = slow_start();
-    if (nregions) {
+    qstate *qs = find_qstate(q);
+    if (nregions && qs) {
         sync_up();
         slow_end("sync_up", t0);
-        EnterCriticalSection(&signal_cs);
+        EnterCriticalSection(&qs->signal_cs);
         EnterCriticalSection(&list_cs);
         for (UINT i = 0; i < n; i++) {
             list_writes *e = list_entry(lists[i], FALSE);
-            for (UINT k = 0; e && k < e->n; k++) push_write(&staged, &nstaged, &capstaged, e->w[k]);
+            for (UINT k = 0; e && k < e->n; k++) push_write(&qs->staged, &qs->nstaged, &qs->capstaged, e->w[k]);
             if (label_addr && e && e->n) {
                 LONG first, last;
                 label_span(e->w, e->n, &first, &last);
@@ -353,7 +372,7 @@ static void STDMETHODCALLTYPE hk_execute(ID3D12CommandQueue *q, UINT n, ID3D12Co
             }
         }
         LeaveCriticalSection(&list_cs);
-        LeaveCriticalSection(&signal_cs);
+        LeaveCriticalSection(&qs->signal_cs);
     }
     t0 = slow_start();
     ((execute_fn)queue_vt_orig[10])(q, n, lists);
@@ -364,46 +383,76 @@ static HRESULT STDMETHODCALLTYPE hk_signal(ID3D12CommandQueue *q, ID3D12Fence *f
 {
     job *j;
     HRESULT hr;
-    if (!nregions || !queue_fence)
+    qstate *qs = find_qstate(q);
+    if (!nregions || !qs || !qs->fence)
         return ((signal_fn)queue_vt_orig[14])(q, fence, value);
 
     j = HeapAlloc(GetProcessHeap(), 0, sizeof(*j));
-    EnterCriticalSection(&signal_cs);   /* keeps job order == GPU order */
-    j->gpu_fence = queue_fence;
-    j->gpu_value = InterlockedIncrement64(&queue_fence_value);
-    hr = ((signal_fn)queue_vt_orig[14])(q, queue_fence, j->gpu_value);
+    EnterCriticalSection(&qs->signal_cs);
+    j->gpu_fence = qs->fence;
+    j->gpu_value = InterlockedIncrement64(&qs->value);
+    hr = ((signal_fn)queue_vt_orig[14])(q, qs->fence, j->gpu_value);
     if (FAILED(hr)) {
-        LeaveCriticalSection(&signal_cs);
+        LeaveCriticalSection(&qs->signal_cs);
         HeapFree(GetProcessHeap(), 0, j);
         return ((signal_fn)queue_vt_orig[14])(q, fence, value);
     }
     ID3D12Fence_AddRef(fence);
     j->fence = fence;
     j->value = value;
-    j->w = staged;
-    j->nw = nstaged;
+    j->w = qs->staged;
+    j->nw = qs->nstaged;
     if (label_addr) {
         LONG first, last;
         label_span(j->w, j->nw, &first, &last);
         logmsg("trace signal fence %p=%llu labels %ld..%ld (gpu %llu)", (void *)fence, (unsigned long long)value,
                first, last, (unsigned long long)j->gpu_value);
     }
-    staged = NULL;
-    nstaged = capstaged = 0;
+    qs->staged = NULL;
+    qs->nstaged = qs->capstaged = 0;
     j->next = NULL;
-    EnterCriticalSection(&job_cs);
-    if (job_tail) job_tail->next = j; else job_head = j;
-    job_tail = j;
-    LeaveCriticalSection(&job_cs);
-    LeaveCriticalSection(&signal_cs);
-    ReleaseSemaphore(job_sem, 1, NULL);
+    EnterCriticalSection(&qs->cs);
+    if (qs->tail) qs->tail->next = j; else qs->head = j;
+    qs->tail = j;
+    LeaveCriticalSection(&qs->cs);
+    LeaveCriticalSection(&qs->signal_cs);
+    ReleaseSemaphore(qs->sem, 1, NULL);
     return S_OK;
 }
 
-static void hook_queue(ID3D12CommandQueue *q)
+/* own fence, job list and worker for a new queue */
+static void add_qstate(ID3D12CommandQueue *q, D3D12_COMMAND_LIST_TYPE type)
+{
+    static SRWLOCK add_lock = SRWLOCK_INIT;
+    ID3D12Device *dev = NULL;
+    qstate *qs;
+    AcquireSRWLockExclusive(&add_lock);
+    if (nqueues == MAX_QUEUES) {
+        ReleaseSRWLockExclusive(&add_lock);
+        logmsg("queue %p: more than %d queues, its signals are not deferred", q, MAX_QUEUES);
+        return;
+    }
+    qs = &qstates[nqueues];
+    memset(qs, 0, sizeof(*qs));
+    qs->q = q;
+    InitializeCriticalSection(&qs->cs);
+    InitializeCriticalSection(&qs->signal_cs);
+    qs->sem = CreateSemaphoreA(NULL, 0, 0x7fffffff, NULL);
+    if (SUCCEEDED(ID3D12CommandQueue_GetDevice(q, &IID_ID3D12Device, (void **)&dev)) && dev) {
+        ID3D12Device_CreateFence(dev, 0, D3D12_FENCE_FLAG_NONE, &IID_ID3D12Fence, (void **)&qs->fence);
+        ID3D12Device_Release(dev);
+    }
+    CloseHandle(CreateThread(NULL, 0, signal_worker, qs, 0, NULL));
+    InterlockedIncrement(&nqueues);   /* published last: find_qstate reads without the lock */
+    ReleaseSRWLockExclusive(&add_lock);
+    logmsg("queue %p type %d: own fence %p and signal worker", q, type, (void *)qs->fence);
+}
+
+static void hook_queue(ID3D12CommandQueue *q, D3D12_COMMAND_LIST_TYPE type)
 {
     void ***obj = (void ***)q;
     if (*obj == queue_vt) return;
+    add_qstate(q, type);
     if (!queue_vt_orig) {
         queue_vt_orig = *obj;
         memcpy(queue_vt, queue_vt_orig, sizeof(queue_vt));
@@ -1636,7 +1685,7 @@ static HRESULT STDMETHODCALLTYPE hk_create_queue(ID3D12Device *dev, const D3D12_
                                                  REFIID riid, void **ppv)
 {
     HRESULT hr = ((create_queue_fn)dev_vt_orig[8])(dev, desc, riid, ppv);
-    if (SUCCEEDED(hr) && ppv && *ppv) hook_queue(*ppv);
+    if (SUCCEEDED(hr) && ppv && *ppv) hook_queue(*ppv, desc ? desc->Type : -1);
     return hr;
 }
 
@@ -1679,9 +1728,6 @@ static HRESULT STDMETHODCALLTYPE hk_open_existing_heap(ID3D12Device *dev, const 
 
     hr = ID3D12Heap_QueryInterface(g->heap, riid, ppv);
     if (FAILED(hr)) { logmsg("heap QI failed %#lx", hr); ID3D12Heap_Release(g->heap); return hr; }
-
-    if (!queue_fence)
-        ((create_fence_fn)dev_vt_orig[36])(dev, 0, D3D12_FENCE_FLAG_NONE, &IID_ID3D12Fence, (void **)&queue_fence);
 
     /* D3DMetal gives each placed resource its own storage, so the heap itself is
      * only bookkeeping: buffers placed in it become regions in hk_create_placed */
@@ -2407,7 +2453,19 @@ static DWORD WINAPI prio_thread(void *arg)
  * the 32-byte syscall stub of NtFlushProcessWriteBuffers is copied out as the
  * real call and its entry jumps to a wrapper that lets one thread through at a
  * time. If the stub is not the expected one, only azimuth.exe's import is
- * redirected (which misses the game's calls). All in memory. FH2_FLUSH=0 disables it,
+ * redirected (which misses the game's calls). All in memory. FH2_FLUSH=0 disables it.
+ * By default (since 0.1.7) the wrapper does not make the real call but the CoreCLR
+ * trick (FH2_FLUSH=real keeps the real call, serialized): one page is made
+ * writable, written and made inaccessible again, and the protection change makes
+ * the kernel shoot down that page's TLB entry on every core running the process,
+ * which drains their write buffers. It never looks at other threads, so it cannot
+ * get stuck in thread_get_state (seen with a single caller under Azimuth 1.0.2)
+ * and costs a couple of syscalls instead of reading every thread's registers.
+ * Wine's VirtualProtect waits for its process-wide virtual memory lock, which other
+ * threads sometimes hold for 80-250 ms (mapping views), so the page is changed
+ * with macOS's mprotect called straight through the syscall instruction, which
+ * Rosetta hands to the kernel without going through Wine; VirtualProtect is the
+ * fallback if that call fails. The page ends inaccessible, as Wine believes it is;
  * FH2_FLUSH=nolock keeps the wrapper for its timings but takes no lock;
  * FH2_FLUSH=skip (diagnostic only, not safe) replaces the call with a local fence.
  * Every 10 s the log gets the call count, the time spent in the real call and
@@ -2415,6 +2473,7 @@ static DWORD WINAPI prio_thread(void *arg)
 static void (WINAPI *real_flush)(void);
 static SRWLOCK flush_lock = SRWLOCK_INIT;
 static BOOL flush_nolock, flush_skip;
+static volatile LONG *flush_page;   /* the protect trick, unless FH2_FLUSH=real */
 static LARGE_INTEGER flush_freq;
 static LONG64 flush_calls, flush_busy, flush_busy_max, flush_wait, flush_wait_max, flush_report;
 
@@ -2424,6 +2483,43 @@ static void flush_max(LONG64 *max, LONG64 v)
     while (v > (m = *max) && InterlockedCompareExchange64(max, v, m) != m) ;
 }
 
+#define FLUSH_PAGE_SIZE 0x4000   /* a whole host page on Apple Silicon */
+static BOOL flush_raw = TRUE;
+
+/* macOS mprotect (BSD syscall 74); returns 0 or the errno */
+static long mac_mprotect(volatile void *addr, SIZE_T len, int prot)
+{
+    long ret;
+    unsigned char failed;
+    __asm__ volatile("syscall; setc %1"
+                     : "=a"(ret), "=r"(failed)
+                     : "a"(0x2000000L + 74), "D"(addr), "S"(len), "d"((long)prot)
+                     : "rcx", "r11", "memory", "cc");
+    return failed ? (ret ? ret : -1) : 0;
+}
+
+static void protect_flush(void)
+{
+    DWORD old;
+    if (flush_raw) {
+        long e = mac_mprotect(flush_page, FLUSH_PAGE_SIZE, 3 /* PROT_READ|PROT_WRITE */);
+        if (!e) {
+            InterlockedIncrement(flush_page);   /* the page is in this core's TLB and dirty */
+            e = mac_mprotect(flush_page, FLUSH_PAGE_SIZE, 0 /* PROT_NONE */);
+        }
+        if (!e) return;
+        flush_raw = FALSE;
+        logmsg("flush: mprotect syscall failed (%ld), using VirtualProtect", e);
+    }
+    {
+        LONG64 t0 = slow_start();
+        VirtualProtect((void *)flush_page, FLUSH_PAGE_SIZE, PAGE_READWRITE, &old);
+        InterlockedIncrement(flush_page);
+        VirtualProtect((void *)flush_page, FLUSH_PAGE_SIZE, PAGE_NOACCESS, &old);
+        slow_end("flush: VirtualProtect pair", t0);
+    }
+}
+
 static void WINAPI hk_flush(void)
 {
     LARGE_INTEGER t0, t1, t2;
@@ -2431,7 +2527,7 @@ static void WINAPI hk_flush(void)
     QueryPerformanceCounter(&t0);
     if (!flush_nolock) AcquireSRWLockExclusive(&flush_lock);
     QueryPerformanceCounter(&t1);
-    if (flush_skip) MemoryBarrier(); else real_flush();
+    if (flush_skip) MemoryBarrier(); else if (flush_page) protect_flush(); else real_flush();
     QueryPerformanceCounter(&t2);
     if (!flush_nolock) ReleaseSRWLockExclusive(&flush_lock);
     InterlockedIncrement64(&flush_calls);
@@ -2482,7 +2578,7 @@ static BOOL hook_flush_ntdll(void)
     VirtualProtect(fn, sizeof(jump), old, &old);
     FlushInstructionCache(GetCurrentProcess(), fn, sizeof(jump));
     logmsg("FlushProcessWriteBuffers: ntdll's NtFlushProcessWriteBuffers %s",
-           flush_skip ? "SKIPPED (diagnostic)" : flush_nolock ? "timed, not serialized" : "serialized for every caller");
+           flush_skip ? "SKIPPED (diagnostic)" : flush_nolock ? "timed, not serialized" : flush_page ? "replaced by a page protection change (protect), serialized" : "serialized for every caller");
     return TRUE;
 }
 
@@ -2508,11 +2604,346 @@ static BOOL hook_flush(HMODULE exe)
             slots->u1.Function = (ULONG_PTR)hk_flush;
             VirtualProtect(&slots->u1.Function, sizeof(slots->u1.Function), old, &old);
             logmsg("FlushProcessWriteBuffers: %s's import %s", (const char *)(base + imp->Name),
-                   flush_skip ? "SKIPPED (diagnostic)" : flush_nolock ? "timed, not serialized" : "serialized");
+                   flush_skip ? "SKIPPED (diagnostic)" : flush_nolock ? "timed, not serialized" : flush_page ? "protect, serialized" : "serialized");
             return TRUE;
         }
     }
     return FALSE;
+}
+
+/* ---------------- virtual memory: statistics and address placement ---------------- */
+
+/* Near busy places two threads allocate and free virtual memory while Azimuth's
+ * worker waits: one sits in NtAllocateVirtualMemoryEx -> mach_vm_map, the other
+ * waits for Wine's virtual memory lock in NtFreeVirtualMemory. FH2_VMSTATS=12
+ * hooks NtAllocateVirtualMemoryEx and NtFreeVirtualMemory like the flush hook and
+ * logs every 10 s the calls, time spent, sizes, call shapes and the callers in
+ * azimuth.exe or the game that cost the most (bit 2, NtAllocateVirtualMemory,
+ * hangs the start: TlsGetValue/TlsSetValue allocate under it). */
+typedef LONG (WINAPI *nt_alloc_fn)(HANDLE, void **, ULONG_PTR, SIZE_T *, ULONG, ULONG);
+typedef LONG (WINAPI *nt_alloc_ex_fn)(HANDLE, void **, SIZE_T *, ULONG, ULONG, void *, ULONG);
+typedef LONG (WINAPI *nt_free_fn)(HANDLE, void **, SIZE_T *, ULONG);
+static nt_alloc_fn real_nt_alloc;
+static nt_alloc_ex_fn real_nt_alloc_ex;
+static nt_free_fn real_nt_free;
+static DWORD vm_tls = TLS_OUT_OF_INDEXES;
+static SRWLOCK vm_lock = SRWLOCK_INIT;
+enum { VM_ALLOC, VM_FREE, VM_OPS };
+static const char *const vm_op_name[VM_OPS] = {"alloc", "free"};
+static struct { LONG64 n, ticks, max, bytes, big; } vm_op[VM_OPS];
+#define VM_CALLERS 512
+/* per caller and call shape: sig = type | protect << 32, shape = log2(size) | base given << 8 | ext params << 9 */
+typedef struct { void *addr; int op; ULONG64 sig; UINT shape; LONG64 n, ticks, bytes; } vm_caller;
+static vm_caller vm_callers[VM_CALLERS];
+static BOOL place_on;   /* on unless FH2_PLACE=0, see place_alloc */
+static volatile LONG64 place_hits, place_misses, place_fallbacks;
+
+/* Modules the unwind walks through, with their .pdata read once: the loader's
+ * own lookup takes the loader lock, which the callers may hold with the heap
+ * lock. 0-2 system DLLs, 3 this layer, 4 azimuth.exe, 5 the game (set later). */
+extern IMAGE_DOS_HEADER __ImageBase;
+typedef struct { uintptr_t base, end; const RUNTIME_FUNCTION *rf; DWORD n; } vm_module;
+static vm_module vm_mods[6];
+
+static void vm_module_init(vm_module *m, uint8_t *b, SIZE_T size)
+{
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(b + ((IMAGE_DOS_HEADER *)b)->e_lfanew);
+    IMAGE_DATA_DIRECTORY *d = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+    m->rf = (const RUNTIME_FUNCTION *)(b + d->VirtualAddress);
+    m->n = d->Size / sizeof(RUNTIME_FUNCTION);
+    m->end = (uintptr_t)b + (size ? size : nt->OptionalHeader.SizeOfImage);
+    m->base = (uintptr_t)b;
+}
+
+static const RUNTIME_FUNCTION *vm_lookup(const vm_module *m, uintptr_t pc)
+{
+    DWORD rva = (DWORD)(pc - m->base), lo = 0, hi = m->n;
+    while (lo < hi) {
+        DWORD mid = (lo + hi) / 2;
+        if (rva < m->rf[mid].BeginAddress) hi = mid;
+        else if (rva >= m->rf[mid].EndAddress) lo = mid + 1;
+        else return &m->rf[mid];
+    }
+    return NULL;
+}
+
+/* the first return address in azimuth.exe or the game, by a real unwind */
+static void *vm_find_caller(void)
+{
+    CONTEXT ctx;
+    RtlCaptureContext(&ctx);
+    for (int depth = 0; depth < 24; depth++) {
+        const vm_module *m = NULL;
+        const RUNTIME_FUNCTION *fe;
+        for (int i = 0; i < 6; i++)
+            if (vm_mods[i].base && ctx.Rip >= vm_mods[i].base && ctx.Rip < vm_mods[i].end) m = &vm_mods[i];
+        if (!m) return NULL;
+        if (depth && m >= &vm_mods[4]) return (void *)ctx.Rip;
+        if ((fe = vm_lookup(m, ctx.Rip))) {
+            void *hd;
+            ULONG64 frame;
+            RtlVirtualUnwind(UNW_FLAG_NHANDLER, m->base, ctx.Rip, (PRUNTIME_FUNCTION)fe, &ctx, &hd, &frame, NULL);
+        } else {
+            ctx.Rip = *(DWORD64 *)ctx.Rsp;   /* leaf function */
+            ctx.Rsp += 8;
+        }
+        if (!ctx.Rip) return NULL;
+    }
+    return NULL;
+}
+
+static void vm_record(int op, LONG64 ticks, SIZE_T bytes, void *caller, ULONG64 sig, UINT shape)
+{
+    AcquireSRWLockExclusive(&vm_lock);
+    vm_op[op].n++; vm_op[op].ticks += ticks; vm_op[op].bytes += bytes;
+    if (ticks > vm_op[op].max) vm_op[op].max = ticks;
+    if (ticks * 1000 > flush_freq.QuadPart) vm_op[op].big++;   /* over 1 ms */
+    for (UINT i = 0, h = (UINT)((((uintptr_t)caller >> 2) ^ sig ^ shape) * 2654435761u + op) % VM_CALLERS; i < VM_CALLERS;
+         i++, h = (h + 1) % VM_CALLERS) {
+        if (vm_callers[h].n && (vm_callers[h].addr != caller || vm_callers[h].op != op || vm_callers[h].sig != sig ||
+                                vm_callers[h].shape != shape)) continue;
+        vm_callers[h].addr = caller; vm_callers[h].op = op; vm_callers[h].sig = sig; vm_callers[h].shape = shape;
+        vm_callers[h].n++; vm_callers[h].ticks += ticks; vm_callers[h].bytes += bytes;
+        break;
+    }
+    ReleaseSRWLockExclusive(&vm_lock);
+}
+
+static void vm_report_once(void)
+{
+    LONG64 us = flush_freq.QuadPart / 1000000;
+    static vm_caller top[VM_CALLERS];
+    UINT ntop = 0;
+    struct { LONG64 n, ticks, max, bytes, big; } ops[VM_OPS];
+    /* copy under the lock, log after: logging takes the heap lock, which a
+     * thread waiting for vm_lock inside an allocation may hold */
+    AcquireSRWLockExclusive(&vm_lock);
+    memcpy(ops, vm_op, sizeof(ops));
+    memset(vm_op, 0, sizeof(vm_op));
+    for (UINT i = 0; i < VM_CALLERS; i++) if (vm_callers[i].n) memcpy(&top[ntop++], &vm_callers[i], sizeof(top[0]));
+    memset(vm_callers, 0, sizeof(vm_callers));
+    ReleaseSRWLockExclusive(&vm_lock);
+    if (place_on) {
+        LONG64 hits = InterlockedExchange64(&place_hits, 0), misses = InterlockedExchange64(&place_misses, 0);
+        LONG64 fallbacks = InterlockedExchange64(&place_fallbacks, 0);
+        if (hits || misses || fallbacks)
+            logmsg("vm: placed %lld at the first try, %lld after a taken address, %lld left to Wine", hits, misses, fallbacks);
+    }
+    for (int o = 0; o < VM_OPS; o++)
+        if (ops[o].n && us)
+            logmsg("vm: %s %lld calls in 10 s, %lld ms in all, max %lld us, %lld over 1 ms, %lld MiB", vm_op_name[o],
+                   ops[o].n, ops[o].ticks / us / 1000, ops[o].max / us, ops[o].big, ops[o].bytes >> 20);
+    for (int k = 0; k < 8 && ntop; k++) {
+        UINT best = 0;
+        char name[MAX_PATH] = "?";
+        HMODULE m = NULL;
+        for (UINT i = 1; i < ntop; i++) if (top[i].ticks > top[best].ticks) best = i;
+        for (int c = 4; c < 6; c++)
+            if ((uintptr_t)top[best].addr >= vm_mods[c].base && (uintptr_t)top[best].addr < vm_mods[c].end) {
+                m = (HMODULE)vm_mods[c].base;
+                strcpy(name, c == 5 ? "game" : "azimuth.exe");
+            }
+        logmsg("vm:   %s from %s+%#llx type %#lx prot %#lx size ~2^%u%s%s: %lld calls, %lld ms, %lld KiB", vm_op_name[top[best].op], name,
+               (unsigned long long)((uintptr_t)top[best].addr - (uintptr_t)m), (ULONG)top[best].sig, (ULONG)(top[best].sig >> 32),
+               top[best].shape & 0xff, top[best].shape & 0x100 ? " base given" : "", top[best].shape & 0x200 ? " ext params" : "",
+               top[best].n, us ? top[best].ticks / us / 1000 : 0, top[best].bytes >> 10);
+        top[best] = top[--ntop];
+    }
+}
+
+/* the thread's own logging and lookups allocate too: those calls are not counted */
+static UINT vm_shape(SIZE_T size, void **base, BOOL ext)
+{
+    UINT l = 0;
+    while (l < 63 && ((SIZE_T)1 << (l + 1)) <= size) l++;
+    return l | (base && *base ? 0x100 : 0) | (ext ? 0x200 : 0);
+}
+
+#define VM_WRAP(op, bytes, sig, shape, call) \
+    LARGE_INTEGER t0, t1; LONG r; UINT sh; \
+    if (TlsGetValue(vm_tls)) return call; \
+    TlsSetValue(vm_tls, (void *)1); \
+    sh = (shape); \
+    QueryPerformanceCounter(&t0); r = call; QueryPerformanceCounter(&t1); \
+    vm_record(op, t1.QuadPart - t0.QuadPart, (bytes), vm_find_caller(), (sig), sh); \
+    TlsSetValue(vm_tls, NULL); \
+    return r;
+
+static LONG WINAPI hk_nt_alloc(HANDLE p, void **base, ULONG_PTR zero, SIZE_T *size, ULONG type, ULONG prot)
+{
+    VM_WRAP(VM_ALLOC, size ? *size : 0, type | (ULONG64)prot << 32, vm_shape(size ? *size : 0, base, FALSE),
+            real_nt_alloc(p, base, zero, size, type, prot))
+}
+
+/* ---- address placement (on by default, FH2_PLACE=0 turns it off) ----
+ * Azimuth asks for its placeholders and write-watched blocks with an address
+ * requirement (4 GB - 1 TB, or 2 - 4 TB, 64 KB aligned) and no address. Wine
+ * looks for room from the bottom of the range, probing every 64 KB with
+ * mach_vm_map, and right above 4 GB macOS has Wine, Rosetta, D3DMetal and Metal
+ * mapped: thousands of failing probes, 40-170 ms per call under Rosetta, which
+ * is the stutter near busy places. The layer picks the address instead, from a
+ * cursor that starts in the middle of the range, and asks for exactly that
+ * address (one probe). An address that is taken moves the cursor on; after a few
+ * misses the call goes to Wine unchanged, so it is never worse than before. */
+typedef struct { ULONG64 low, high, start; volatile LONG64 cursor; } place_range;
+static place_range place_ranges[8];
+static volatile LONG nplace;
+static SRWLOCK place_lock = SRWLOCK_INIT;
+static place_range *place_find(ULONG64 low, ULONG64 high)
+{
+    place_range *r = NULL;
+    for (LONG i = 0; i < nplace; i++)
+        if (place_ranges[i].low == low && place_ranges[i].high == high) return &place_ranges[i];
+    AcquireSRWLockExclusive(&place_lock);
+    for (LONG i = 0; i < nplace && !r; i++)
+        if (place_ranges[i].low == low && place_ranges[i].high == high) r = &place_ranges[i];
+    if (!r && nplace < 8) {
+        r = &place_ranges[nplace];
+        r->low = low; r->high = high;
+        r->start = (low + (high - low) / 2 + 0x3fffffff) & ~(ULONG64)0x3fffffff;   /* mid-range, 1 GB aligned */
+        r->cursor = (LONG64)r->start;
+        MemoryBarrier();
+        nplace++;
+    }
+    ReleaseSRWLockExclusive(&place_lock);
+    return r;
+}
+
+/* STATUS_SUCCESS or the failure; *done FALSE when the call is not one to place */
+static LONG place_alloc(HANDLE p, void **base, SIZE_T *size, ULONG type, ULONG prot,
+                        const MEM_EXTENDED_PARAMETER *params, ULONG count, BOOL *done)
+{
+    MEM_EXTENDED_PARAMETER rest[8];
+    const MEM_ADDRESS_REQUIREMENTS *req = NULL;
+    ULONG nrest = 0;
+    ULONG64 align, sz;
+    place_range *r;
+    LONG st = -1;
+    *done = FALSE;
+    if (!place_on || !base || *base || !size || !*size || !params || !count || count > 8 ||
+        p != GetCurrentProcess() || !(type & MEM_RESERVE)) return 0;
+    for (ULONG i = 0; i < count; i++) {
+        if (params[i].Type == MemExtendedParameterAddressRequirements) req = params[i].Pointer;
+        else rest[nrest++] = params[i];
+    }
+    if (!req || !req->HighestEndingAddress) return 0;
+    align = req->Alignment > 0x10000 ? req->Alignment : 0x10000;
+    sz = (*size + align - 1) & ~(align - 1);
+    if (!(r = place_find((ULONG64)req->LowestStartingAddress, (ULONG64)req->HighestEndingAddress))) return 0;
+    for (int tries = 0; tries < 6; tries++) {
+        ULONG64 a = (ULONG64)InterlockedExchangeAdd64(&r->cursor, (LONG64)sz);
+        void *b;
+        SIZE_T s2 = *size;
+        a = (a + align - 1) & ~(align - 1);
+        if (a + sz - 1 > r->high) {   /* the end of the range: start over from the middle */
+            InterlockedCompareExchange64(&r->cursor, (LONG64)r->start, (LONG64)(a + sz));
+            continue;
+        }
+        b = (void *)a;
+        st = real_nt_alloc_ex(p, &b, &s2, type, prot, nrest ? rest : NULL, nrest);
+        if (st >= 0) {
+            *base = b;
+            *size = s2;
+            *done = TRUE;
+            InterlockedIncrement64(tries ? &place_misses : &place_hits);
+            return st;
+        }
+        InterlockedExchangeAdd64(&r->cursor, 16 << 20);   /* taken: skip ahead */
+    }
+    InterlockedIncrement64(&place_fallbacks);
+    return st;
+}
+
+static LONG alloc_ex_call(HANDLE p, void **base, SIZE_T *size, ULONG type, ULONG prot, void *params, ULONG count)
+{
+    BOOL done;
+    LONG st = place_alloc(p, base, size, type, prot, params, count, &done);
+    return done ? st : real_nt_alloc_ex(p, base, size, type, prot, params, count);
+}
+
+static BOOL vm_stats_on;
+
+static LONG WINAPI hk_nt_alloc_ex(HANDLE p, void **base, SIZE_T *size, ULONG type, ULONG prot, void *params, ULONG count)
+{
+    if (!vm_stats_on) return alloc_ex_call(p, base, size, type, prot, params, count);
+    VM_WRAP(VM_ALLOC, size ? *size : 0, type | (ULONG64)prot << 32, vm_shape(size ? *size : 0, base, count != 0),
+            alloc_ex_call(p, base, size, type, prot, params, count))
+}
+
+static LONG WINAPI hk_nt_free(HANDLE p, void **base, SIZE_T *size, ULONG type)
+{
+    VM_WRAP(VM_FREE, size ? *size : 0, type, vm_shape(size ? *size : 0, NULL, FALSE), real_nt_free(p, base, size, type))
+}
+
+/* same inline hook as the flush one: copies the 32-byte syscall stub out as the real call */
+static void *hook_nt_stub(const char *name, void *hook)
+{
+    uint8_t *fn = (uint8_t *)GetProcAddress(GetModuleHandleA("ntdll.dll"), name);
+    uint8_t *copy, jump[12] = {0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xe0};
+    uintptr_t target = (uintptr_t)hook;
+    DWORD old;
+    if (!fn) return NULL;
+    for (int i = 0; i < 32; i++)
+        if (i != 4 && i != 5 && fn[i] != nt_stub[i]) {
+            logmsg("vm: %s stub differs at byte %d, not hooked", name, i);
+            return NULL;
+        }
+    if (!(copy = VirtualAlloc(NULL, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE))) return NULL;
+    memcpy(copy, fn, 32);
+    memcpy(jump + 2, &target, 8);
+    if (!VirtualProtect(fn, sizeof(jump), PAGE_EXECUTE_READWRITE, &old)) return NULL;
+    memcpy(fn, jump, sizeof(jump));
+    VirtualProtect(fn, sizeof(jump), old, &old);
+    FlushInstructionCache(GetCurrentProcess(), fn, sizeof(jump));
+    return copy;
+}
+
+/* reports from its own thread: logging allocates and takes the CRT and log locks */
+static DWORD WINAPI vm_report_thread(void *arg)
+{
+    (void)arg;
+    TlsSetValue(vm_tls, (void *)1);   /* its own allocations are not counted */
+    for (;;) {
+        Sleep(10000);
+        if (!vm_mods[5].base) {
+            uint8_t *g = find_game_image();
+            if (g) {
+                vm_module tmp;
+                vm_module_init(&tmp, g, GAME_IMAGE_SIZE);
+                vm_mods[5].rf = tmp.rf; vm_mods[5].n = tmp.n; vm_mods[5].end = tmp.end;
+                MemoryBarrier();
+                vm_mods[5].base = tmp.base;
+            }
+        }
+        vm_report_once();
+    }
+    return 0;
+}
+
+/* mask: as FH2_VMSTATS (0: no statistics); place: address placement */
+static void hook_vm(int mask, BOOL place)
+{
+    vm_tls = TlsAlloc();
+    vm_stats_on = mask > 0;
+    place_on = place;
+    {
+        static const char *const names[] = {"ntdll.dll", "kernelbase.dll", "kernel32.dll"};
+        for (int i = 0; i < 3; i++) if (GetModuleHandleA(names[i])) vm_module_init(&vm_mods[i], (uint8_t *)GetModuleHandleA(names[i]), 0);
+        volatile uintptr_t self = (uintptr_t)&__ImageBase;   /* volatile: the header is read past the symbol */
+        vm_module_init(&vm_mods[3], (uint8_t *)self, 0);
+        vm_module_init(&vm_mods[4], (uint8_t *)GetModuleHandleA("azimuth.exe"), 0);
+    }
+    QueryPerformanceFrequency(&flush_freq);
+    /* mask: 1 NtAllocateVirtualMemory, 2 NtAllocateVirtualMemoryEx, 4 NtFreeVirtualMemory ("1" alone = all) */
+    if (mask == 1) mask = 7; else mask >>= 1;
+    if (place) mask |= 2;
+    if (mask & 2) real_nt_alloc_ex = hook_nt_stub("NtAllocateVirtualMemoryEx", hk_nt_alloc_ex);
+    if (mask & 4) real_nt_free = hook_nt_stub("NtFreeVirtualMemory", hk_nt_free);
+    if (mask & 1) real_nt_alloc = hook_nt_stub("NtAllocateVirtualMemory", hk_nt_alloc);
+    if (place && !real_nt_alloc_ex) place_on = FALSE;
+    logmsg("vm: statistics %s, address placement %s (alloc %p, alloc_ex %p, free %p)", vm_stats_on ? "on" : "off",
+           place_on ? "on" : "off", (void *)real_nt_alloc, (void *)real_nt_alloc_ex, (void *)real_nt_free);
+    CloseHandle(CreateThread(NULL, 0, vm_report_thread, NULL, 0, NULL));
 }
 
 /* ---------------- exports ---------------- */
@@ -3973,8 +4404,6 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
     DisableThreadLibraryCalls(inst);
     InitializeCriticalSection(&log_cs);
     QueryPerformanceFrequency(&slow_freq);
-    InitializeCriticalSection(&job_cs);
-    InitializeCriticalSection(&signal_cs);
     InitializeCriticalSection(&list_cs);
     logf = fopen("data\\logs\\fh2port.log", "a");
     /* this DLL is itself named d3d12.dll (loaded by a native override), so the
@@ -3992,7 +4421,6 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
     real_get_debug_interface = (debug_iface_fn)GetProcAddress(real, "D3D12GetDebugInterface");
     real_serialize_rs = (serialize_rs_fn)GetProcAddress(real, "D3D12SerializeRootSignature");
     resolve_passthrough(real);
-    job_sem = CreateSemaphoreA(NULL, 0, 0x7fffffff, NULL);
     {
         char v[8] = "";
         hide_tiled = !(GetEnvironmentVariableA("FH2_TILED", v, sizeof(v)) && v[0] == '1');
@@ -4028,7 +4456,6 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
         logmsg("magenta twins of instanced PSOs: %s", tint_build ? "built" : "off");
         logmsg("tiled resources %s", hide_tiled ? "hidden from the wrapper" : "reported");
     }
-    CloseHandle(CreateThread(NULL, 0, signal_worker, NULL, 0, NULL));
     {
         char v[8] = "";
         if (!(GetEnvironmentVariableA("FH2_FIBER", v, sizeof(v)) && v[0] == '0') && GetModuleHandleA("azimuth.exe")) {
@@ -4040,6 +4467,15 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
             CloseHandle(CreateThread(NULL, 0, prio_thread, NULL, 0, NULL));
         flush_nolock = GetEnvironmentVariableA("FH2_FLUSH", v, sizeof(v)) && !strcmp(v, "nolock");
         flush_skip = GetEnvironmentVariableA("FH2_FLUSH", v, sizeof(v)) && !strcmp(v, "skip");
+        if (!(GetEnvironmentVariableA("FH2_FLUSH", v, sizeof(v)) && !strcmp(v, "real"))) {
+            flush_page = VirtualAlloc(NULL, FLUSH_PAGE_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_NOACCESS);
+            if (!flush_page) logmsg("flush: VirtualAlloc failed, using the real call");
+        }
+        {
+            int mask = GetEnvironmentVariableA("FH2_VMSTATS", v, sizeof(v)) ? atoi(v) : 0;
+            BOOL place = !(GetEnvironmentVariableA("FH2_PLACE", v, sizeof(v)) && v[0] == '0');
+            if ((mask > 0 || place) && GetModuleHandleA("azimuth.exe")) hook_vm(mask, place);
+        }
         if (!(GetEnvironmentVariableA("FH2_FLUSH", v, sizeof(v)) && v[0] == '0') && GetModuleHandleA("azimuth.exe") &&
             !hook_flush_ntdll() && !hook_flush(GetModuleHandleA("azimuth.exe")))
             logmsg("FlushProcessWriteBuffers: azimuth.exe's import not found, left alone");

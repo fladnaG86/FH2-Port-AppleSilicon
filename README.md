@@ -18,7 +18,7 @@ in races (Metal HUD, top right). [Watch the video](https://github.com/fladnaG86/
 
 ## English
 
-This project lets **Azimuth 0.9.10**, Almost There Games' compatibility wrapper for the Xbox One
+This project lets **Azimuth 1.0.2**, Almost There Games' compatibility wrapper for the Xbox One
 version of **Forza Horizon 2 (1.0.0.64)**, run on Apple Silicon Macs through **CrossOver** and
 Apple's **Game Porting Toolkit (D3DMetal)**. Azimuth itself targets Windows and Linux; this repo
 only adds layers *underneath* it, the way DXVK or vkd3d sit under a game:
@@ -28,10 +28,24 @@ only adds layers *underneath* it, the way DXVK or vkd3d sit under a game:
 - **FH2 Port.app**: a launcher that installs both into a CrossOver bottle and starts the game.
 
 Developed and tested on a MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver on Wine 11 with
-GPTK 4.0b3. Free roam, races, menus, audio, controllers and keyboard work.
+GPTK 4.0b3 and Azimuth 1.0.2 (0.9.10 starts with this layer too, but 0.1.7 was played on 1.0.2 only).
+Free roam, races, menus, audio, controllers and keyboard work.
 
 ### What's new
 
+- **0.1.7**: **Azimuth 1.0.x** works (it froze after a few minutes, issue #14), and the **stutter
+  near buildings is gone**.
+  - Azimuth 1.0 drives two GPU queues at once. The layer held every queue's signals with one
+    fence and one worker thread, so each queue could end up waiting for the other; each queue
+    now has its own.
+  - The stutter: near busy places Azimuth reserves memory with `VirtualAlloc2`, asking for an
+    address between 4 GB and 1 TB. Wine looks for room from the bottom of that range, trying every
+    64 KB with `mach_vm_map`, and right above 4 GB macOS has Wine, Rosetta, D3DMetal and Metal
+    mapped: thousands of failed tries, 40–170 ms per call, 2–7 s of every 10 s. The layer now picks
+    a free address in the upper half of the range and asks for exactly that one: under 1 ms.
+  - `FlushProcessWriteBuffers` no longer reads every thread's registers: one page protection change
+    (macOS `mprotect`, called directly) drains the other cores' write buffers. ~17 µs instead of
+    ~1.8 ms, and it cannot hang in `thread_get_state` (seen once with a single caller).
 - **0.1.6**: about **half the stutter** in busy places. Wine on macOS runs threads
   of normal Windows priority below native apps (Mach priority 26 instead of 31), and Azimuth's
   worker and many game threads sit there; the layer now raises them to the native level.
@@ -51,9 +65,11 @@ GPTK 4.0b3. Free roam, races, menus, audio, controllers and keyboard work.
 |---|---|
 | `ID3D12Device3::OpenExistingHeapFromAddress` is not implemented, and Azimuth places GPU heaps over the game's memory | Emulated: a CPU-visible heap mirrors that memory, synced in 64-byte blocks before each submit and after the GPU; queue signals are held until the data is visible |
 | `WriteBufferImmediate` does nothing | Replayed on the CPU before the fence, or turned into a copy from an upload ring |
+| Queue signals held until the data is visible (row above) must stay in each queue's order; Azimuth 1.0 uses two queues | Each queue has its own fence, list and worker thread |
 | Azimuth only starts on devices that report existing heaps and resource binding tier 3 | Both reported as supported (existing heaps are the emulation above) |
 | Tiled resources do not alias | Reported as unsupported, so Azimuth takes another path |
-| `FlushProcessWriteBuffers` (Wine on macOS reads every thread's registers) deadlocks under Rosetta when two threads call it at once | ntdll's `NtFlushProcessWriteBuffers` is hooked in memory and lets one caller through at a time |
+| `FlushProcessWriteBuffers` (Wine on macOS reads every thread's registers) deadlocks under Rosetta when two threads call it at once, and costs ~1.8 ms a call | ntdll's `NtFlushProcessWriteBuffers` is hooked in memory: one caller at a time, and a page protection change (macOS `mprotect`) instead of the register reads |
+| Wine looks for an address that fits Azimuth's `VirtualAlloc2` requirements (4 GB–1 TB) by trying every 64 KB from the bottom, through macOS's own mappings: up to 170 ms a call | ntdll's `NtAllocateVirtualMemoryEx` is hooked: the layer picks a free address in the upper half of the range and asks for it; Wine's search is the fallback |
 | Threads of normal Windows priority get Mach priority 26, below native apps' 31 | Every 2 s, threads below above-normal are raised to above-normal (Mach 31) |
 | **Input layouts using `D3D12_APPEND_ALIGNED_ELEMENT` over several vertex buffers get wrong offsets.** In the world-prop layout `I_YAXIS` is fetched 28 bytes and `I_COLOUR` 56 bytes past their real position | Offsets are written out per slot before the layout reaches D3DMetal. This fixes the giant "phantom walls", black or upside-down trees, bent poles and misaligned barriers |
 
@@ -84,6 +100,14 @@ memory**, after Azimuth has loaded the game; the game files on disk stay untouch
 
 The app also sets `antialiasing=off` (MSAA draws dashes in the sky on D3DMetal) and
 `resolution=1440`, which supersamples and smooths the edges.
+
+### Updating Azimuth without losing your saves
+
+Saves live in each Azimuth folder (`data/titles/1A96545B/saves`). Either unzip the new Azimuth
+**over** the old folder (it keeps `data/titles` and converts `azimuth.ini` itself), or unzip it in a
+new folder and copy `data/titles` from the old one into it before the first start. Then open
+FH2 Port with **Option** held and choose the new folder if it changed; the app installs the layer
+there. Updating FH2 Port itself never touches the saves.
 
 ### Install by hand
 
@@ -126,9 +150,11 @@ Keys count only while the game window has focus; keyboard and controllers work t
   lost the immediate writes of command lists once more than 4096 lists had been created. The
   remaining freezes were the `FlushProcessWriteBuffers` deadlock fixed in 0.1.5; please report it
   if it still happens, with `azimuth.log` and `fh2port.log`.
-- **Stutter** in busy places (for example the buildings around Place Masséna in Nice): the game's
-  own threads run out of CPU time there under Rosetta; the GPU and the layer are not the limit.
-  Raising thread priorities (0.1.6) halves it; what is left is Rosetta's limit.
+- **Stutter** in busy places (the buildings around Place Masséna in Nice, for example): fixed in
+  0.1.7, it was Wine's address search (see What's new). Please report it if you still see it, with
+  `fh2port.log`.
+- If the picture stops on **"Press RT to accelerate"** in the intro while the music goes on, the
+  game is waiting for RT: check that the controller is on, or click the game window and hold W.
 - MSAA must stay off. The intro movies play (no intro skip).
 
 ### Debugging
@@ -138,8 +164,10 @@ Logs are in `data/logs` of the Azimuth folder (`fh2port.log`, `fh2pad.log`, `azi
 `FH2_TINT=1` (magenta twins of instanced PSOs for live bisection), `FH2_APPEND=0` (layouts passed
 through unfixed), `FH2_FIBER=0`, `FH2_TILED=1`, `FH2_SKIP_EI=1`, `FH2_SKIP_VID=1`, `FH2_PATCH=…`,
 `FH2_LABEL=<address>` (traces the values written to that address through record, execute, signal
-and completion), `FH2_FLUSH=0|nolock|skip` (flush fix off / timed without the lock / replaced by a
-local fence, diagnostic only), `FH2_QUIET=1` (no periodic log lines, control file not polled),
+and completion), `FH2_FLUSH=real|0|nolock|skip` (Wine's real flush, serialized as in 0.1.5–0.1.6 /
+flush fix off / timed without the lock / replaced by a local fence, diagnostic only), `FH2_PLACE=0`
+(leave address placement to Wine), `FH2_VMSTATS=12` (every 10 s: virtual memory calls, their cost,
+shapes and callers), `FH2_QUIET=1` (no periodic log lines, control file not polled),
 `FH2_PRIO=<n>` (Windows priority threads are raised to; default 1, `0` leaves them alone).
 Calls into D3DMetal slower than 4 ms are logged as `slow:`. Live commands go through `data/logs/fh2port.ctl` (`top`, `reset`, `dump N`,
 `tint …`, `tintlist`, `tintset …`, `watch …`, `patch on|off`, `stacks` for the Windows-side call
@@ -153,7 +181,7 @@ stack of every thread, useful when the game hangs).
 
 ## Italiano
 
-Questo progetto fa girare **Azimuth 0.9.10**, il wrapper di compatibilità di Almost There Games per
+Questo progetto fa girare **Azimuth 1.0.2**, il wrapper di compatibilità di Almost There Games per
 la versione Xbox One di **Forza Horizon 2 (1.0.0.64)**, sui Mac Apple Silicon tramite **CrossOver**
 e **Game Porting Toolkit (D3DMetal)** di Apple. Azimuth è pensato per Windows e Linux; questo repo
 aggiunge solo dei layer *sotto* di lui, come fanno DXVK o vkd3d sotto un gioco:
@@ -163,11 +191,24 @@ aggiunge solo dei layer *sotto* di lui, come fanno DXVK o vkd3d sotto un gioco:
 - **FH2 Port.app**: un launcher che installa entrambi in una bottle di CrossOver e avvia il gioco.
 
 Sviluppato e provato su MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver su Wine 11 con GPTK
-4.0b3. Mondo aperto, gare, menu, audio, controller e tastiera funzionano; con Azimuth a 60 fps e
+4.0b3 e Azimuth 1.0.2 (anche la 0.9.10 parte con questo layer, ma la 0.1.7 è stata giocata solo sulla
+1.0.2). Mondo aperto, gare, menu, audio, controller e tastiera funzionano; con Azimuth a 60 fps e
 1440 righe il gioco sta intorno ai 60 fps ([video](https://github.com/fladnaG86/FH2-Port-AppleSilicon/releases/tag/video)).
 
 ### Novità
 
+- **0.1.7**: **Azimuth 1.0.x** funziona (si bloccava dopo pochi minuti, issue #14) e **gli scatti
+  vicino ai palazzi sono spariti**.
+  - Azimuth 1.0 usa due code della GPU insieme. Il layer tratteneva i signal di tutte le code con un
+    solo fence e un solo thread, e una coda poteva finire ad aspettare l'altra; ora ogni coda ha i suoi.
+  - Gli scatti: nei punti affollati Azimuth riserva memoria con `VirtualAlloc2` chiedendo un
+    indirizzo fra 4 GB e 1 TB. Wine cerca spazio dal fondo dell'intervallo provando ogni 64 KB con
+    `mach_vm_map`, e subito sopra i 4 GB macOS ha Wine, Rosetta, D3DMetal e Metal: migliaia di
+    tentativi a vuoto, 40–170 ms a chiamata, 2–7 s ogni 10 s. Ora il layer sceglie un indirizzo
+    libero nella metà alta dell'intervallo e chiede proprio quello: meno di 1 ms.
+  - `FlushProcessWriteBuffers` non legge più i registri di ogni thread: un cambio di protezione di
+    una pagina (`mprotect` di macOS, chiamata diretta) svuota i buffer di scrittura degli altri core.
+    ~17 µs invece di ~1,8 ms, e non può bloccarsi in `thread_get_state` (visto una volta con un solo chiamante).
 - **0.1.6**: circa **metà degli scatti** nei punti affollati. Wine su macOS
   fa girare i thread a priorità normale di Windows sotto le app native (priorità Mach 26 invece di
   31), e lì stanno il worker di Azimuth e molti thread del gioco; ora il layer li porta al livello nativo.
@@ -187,9 +228,11 @@ Sviluppato e provato su MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver su Win
 |---|---|
 | `OpenExistingHeapFromAddress` non è implementato, e Azimuth mette gli heap GPU sopra la memoria del gioco | Emulato: un heap visibile dalla CPU fa da specchio a quella memoria, sincronizzato a blocchi di 64 byte prima di ogni invio e dopo la GPU; i signal della coda aspettano che i dati siano visibili |
 | `WriteBufferImmediate` non fa nulla | Rieseguito sulla CPU prima del fence, oppure trasformato in una copia da un buffer di upload |
+| I signal trattenuti finché i dati sono visibili (riga sopra) devono seguire l'ordine di ogni coda; Azimuth 1.0 usa due code | Ogni coda ha fence, lista e thread propri |
 | Azimuth parte solo se il device dichiara existing heaps e resource binding tier 3 | Entrambi dichiarati supportati (gli existing heaps sono l'emulazione qui sopra) |
 | Le tiled resource non fanno aliasing | Dichiarate non supportate, così Azimuth usa un'altra strada |
-| `FlushProcessWriteBuffers` (Wine su macOS legge i registri di ogni thread) si blocca sotto Rosetta se due thread la chiamano insieme | `NtFlushProcessWriteBuffers` di ntdll è agganciata in memoria e fa passare un chiamante alla volta |
+| `FlushProcessWriteBuffers` (Wine su macOS legge i registri di ogni thread) si blocca sotto Rosetta se due thread la chiamano insieme, e costa ~1,8 ms a chiamata | `NtFlushProcessWriteBuffers` di ntdll è agganciata in memoria: un chiamante alla volta, e un cambio di protezione di una pagina (`mprotect` di macOS) al posto della lettura dei registri |
+| Wine cerca un indirizzo che rispetti i requisiti di `VirtualAlloc2` di Azimuth (4 GB–1 TB) provando ogni 64 KB dal fondo, attraverso la memoria di macOS: fino a 170 ms a chiamata | `NtAllocateVirtualMemoryEx` di ntdll è agganciata: il layer sceglie un indirizzo libero nella metà alta dell'intervallo e chiede quello; la ricerca di Wine resta come ripiego |
 | I thread a priorità normale di Windows ricevono priorità Mach 26, sotto il 31 delle app native | Ogni 2 s i thread sotto above-normal vengono portati ad above-normal (Mach 31) |
 | **I layout con `D3D12_APPEND_ALIGNED_ELEMENT` su più vertex buffer ricevono offset sbagliati.** Nel layout degli oggetti del mondo `I_YAXIS` viene letto 28 byte e `I_COLOUR` 56 byte più avanti | Gli offset vengono scritti per ogni slot prima di passare il layout a D3DMetal. Questo corregge i "muri fantasma" giganti, gli alberi neri o capovolti, i pali storti e le sponde disallineate |
 
@@ -221,6 +264,14 @@ memoria**, dopo che Azimuth ha caricato il gioco; i file del gioco su disco rest
 
 L'app imposta anche `antialiasing=off` (con l'MSAA il cielo ha dei trattini su D3DMetal) e
 `resolution=1440`, che fa supersampling e ammorbidisce i bordi.
+
+### Aggiornare Azimuth senza perdere i salvataggi
+
+I salvataggi stanno in ogni cartella di Azimuth (`data/titles/1A96545B/saves`). Scompatta il nuovo
+Azimuth **sopra** la cartella vecchia (tiene `data/titles` e converte da solo `azimuth.ini`),
+oppure in una cartella nuova copiandoci `data/titles` da quella vecchia prima del primo avvio. Poi
+apri FH2 Port tenendo premuto **Opzione** e scegli la cartella nuova se è cambiata: l'app ci installa
+il layer. Aggiornare FH2 Port non tocca mai i salvataggi.
 
 ### Installazione a mano
 
@@ -255,9 +306,11 @@ insieme. `FH2_KEYBOARD=0` lascia i gamepad di Wine come sono.
   ne erano state create più di 4096. I blocchi rimasti erano lo stallo di
   `FlushProcessWriteBuffers` corretto nella 0.1.5; se succede ancora, segnalalo con `azimuth.log` e
   `fh2port.log`.
-- **Scatti** nei punti affollati (per esempio i palazzi intorno a Place Masséna a Nizza): lì i thread
-  del gioco sotto Rosetta non hanno abbastanza CPU; né la GPU né il layer sono il limite.
-  Alzare la priorità dei thread (0.1.6) li dimezza; quel che resta è il limite di Rosetta.
+- **Scatti** nei punti affollati (per esempio i palazzi intorno a Place Masséna a Nizza): corretti
+  nella 0.1.7, erano la ricerca di indirizzi di Wine (vedi Novità). Se li vedi ancora segnalalo con
+  `fh2port.log`.
+- Se nell'intro l'immagine si ferma su **"Premi RT per accelerare"** mentre la musica continua, il
+  gioco aspetta RT: controlla che il controller sia acceso, oppure clicca la finestra del gioco e tieni premuto W.
 - L'MSAA va lasciato spento. I filmati iniziali vengono riprodotti (niente salto dell'intro).
 
 ### Licenza
