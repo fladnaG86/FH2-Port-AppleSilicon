@@ -84,8 +84,13 @@ memory**, after Azimuth has loaded the game; the game files on disk stay untouch
 ### Install with the app
 
 1. In CrossOver (or CrossOver Preview) create a **Windows 10 64-bit** bottle and copy the Azimuth
-   folder into its `drive_c`. Do not start `azimuth.exe` from CrossOver: without the layer it stops
-   at D3D12 checks (heap / DX12 errors) before it asks for the game folder.
+   folder into its `drive_c` (the folder name is up to you). From the Terminal, with a bottle
+   named `fh2` and Azimuth unzipped in Downloads:
+   ```sh
+   ditto ~/Downloads/azimuth-windows "$HOME/Library/Application Support/CrossOver/Bottles/fh2/drive_c/Azimuth"
+   ```
+   Do not start `azimuth.exe` from CrossOver: without the layer it stops at D3D12 checks
+   (heap / DX12 errors) before it asks for the game folder.
 2. Put Microsoft's **`d3dcompiler_47.dll`** in the Azimuth folder (Wine's one cannot compile
    Azimuth's GPU detile shader). It is not included here; one source is the `core/` folder of the
    Firefox 62 Windows 64-bit installer.
@@ -94,7 +99,10 @@ memory**, after Azimuth has loaded the game; the game files on disk stay untouch
    **Open Anyway**.
 4. Choose the bottle, then the folder that contains `azimuth.exe`. The app installs the layer and
    starts Azimuth, which asks for your game folder the first time (open the app once more after
-   that so it applies its settings); later a double-click is enough. Hold **Option** while opening it to choose
+   that so it applies its settings); later a double-click is enough. The game folder must be a real
+   folder: Azimuth refuses symbolic links (copy it, or make an APFS clone with `cp -c -R`). Wine
+   shows your home folder as a drive letter (often **Y:**), which is where to look for a game kept
+   under your home. Hold **Option** while opening it to choose
    again or to uninstall. Bottles in a custom Bottles folder (for example on an external disk)
    are found too; otherwise pick **Other bottle folder…** and choose the bottle's folder.
 
@@ -103,11 +111,26 @@ The app also sets `antialiasing=off` (MSAA draws dashes in the sky on D3DMetal) 
 
 ### Updating Azimuth without losing your saves
 
-Saves live in each Azimuth folder (`data/titles/1A96545B/saves`). Either unzip the new Azimuth
-**over** the old folder (it keeps `data/titles` and converts `azimuth.ini` itself), or unzip it in a
-new folder and copy `data/titles` from the old one into it before the first start. Then open
-FH2 Port with **Option** held and choose the new folder if it changed; the app installs the layer
-there. Updating FH2 Port itself never touches the saves.
+Saves live in each Azimuth folder (`data/titles/1A96545B/saves`). Close the game first, then
+either:
+
+- unzip the new Azimuth **over** the old folder: it keeps `data/titles`, `data/azimuth.ini` (which
+  Azimuth converts itself), `d3dcompiler_47.dll` and the layer. `ditto` merges folders and deletes
+  nothing; in the Finder choose **Merge** for `data`, never **Replace**, which would delete the
+  saves:
+  ```sh
+  ditto ~/Downloads/azimuth-windows "$HOME/Library/Application Support/CrossOver/Bottles/<bottle>/drive_c/<folder>"
+  ```
+- or install it in a **new folder or a new bottle** (steps above) and copy `data/titles` from the
+  old folder before the first start:
+  ```sh
+  B="$HOME/Library/Application Support/CrossOver/Bottles"
+  ditto "$B/<old bottle>/drive_c/<old folder>/data/titles" "$B/<new bottle>/drive_c/<new folder>/data/titles"
+  ```
+
+Then open FH2 Port with **Option** held and choose the new folder if it changed; the app installs
+the layer there. Updating FH2 Port itself never touches the saves. Copying `data/titles` somewhere
+else first is a cheap backup.
 
 ### Install by hand
 
@@ -247,8 +270,13 @@ memoria**, dopo che Azimuth ha caricato il gioco; i file del gioco su disco rest
 ### Installazione con l'app
 
 1. In CrossOver (o CrossOver Preview) crea una bottle **Windows 10 64-bit** e copia la cartella di
-   Azimuth nel suo `drive_c`. Non avviare `azimuth.exe` da CrossOver: senza il layer si ferma ai
-   controlli D3D12 (errori heap / DX12) prima di chiedere la cartella del gioco.
+   Azimuth nel suo `drive_c` (il nome della cartella è libero). Dal Terminale, con una bottle
+   chiamata `fh2` e Azimuth scompattato in Download:
+   ```sh
+   ditto ~/Downloads/azimuth-windows "$HOME/Library/Application Support/CrossOver/Bottles/fh2/drive_c/Azimuth"
+   ```
+   Non avviare `azimuth.exe` da CrossOver: senza il layer si ferma ai controlli D3D12 (errori
+   heap / DX12) prima di chiedere la cartella del gioco.
 2. Metti **`d3dcompiler_47.dll`** di Microsoft nella cartella di Azimuth (quello di Wine non compila
    il suo shader di detile). Non è incluso; si trova per esempio nella cartella `core/`
    dell'installer Windows 64-bit di Firefox 62.
@@ -257,7 +285,10 @@ memoria**, dopo che Azimuth ha caricato il gioco; i file del gioco su disco rest
    sicurezza › **Apri comunque**.
 4. Scegli la bottle e poi la cartella che contiene `azimuth.exe`. L'app installa il layer e avvia
    Azimuth, che la prima volta chiede la cartella del gioco (dopo riapri l'app una volta perché
-   applichi le sue impostazioni); le volte dopo basta il doppio clic. Tieni premuto **Opzione** mentre la apri per
+   applichi le sue impostazioni); le volte dopo basta il doppio clic. La cartella del gioco deve
+   essere una cartella vera: Azimuth rifiuta i link simbolici (copiala, oppure fai un clone APFS con
+   `cp -c -R`). Wine mostra la tua cartella home come un'unità (spesso **Y:**): è lì che trovi un
+   gioco tenuto nella home. Tieni premuto **Opzione** mentre la apri per
    scegliere di nuovo o per disinstallare. Trova anche le bottle in una cartella Bottles
    personalizzata (per esempio su un disco esterno); altrimenti scegli **Other bottle folder…** e
    indica la cartella della bottle.
@@ -267,11 +298,26 @@ L'app imposta anche `antialiasing=off` (con l'MSAA il cielo ha dei trattini su D
 
 ### Aggiornare Azimuth senza perdere i salvataggi
 
-I salvataggi stanno in ogni cartella di Azimuth (`data/titles/1A96545B/saves`). Scompatta il nuovo
-Azimuth **sopra** la cartella vecchia (tiene `data/titles` e converte da solo `azimuth.ini`),
-oppure in una cartella nuova copiandoci `data/titles` da quella vecchia prima del primo avvio. Poi
-apri FH2 Port tenendo premuto **Opzione** e scegli la cartella nuova se è cambiata: l'app ci installa
-il layer. Aggiornare FH2 Port non tocca mai i salvataggi.
+I salvataggi stanno in ogni cartella di Azimuth (`data/titles/1A96545B/saves`). Chiudi prima il
+gioco, poi:
+
+- scompatta il nuovo Azimuth **sopra** la cartella vecchia: restano `data/titles`,
+  `data/azimuth.ini` (che Azimuth converte da solo), `d3dcompiler_47.dll` e il layer. `ditto` unisce
+  le cartelle e non cancella niente; nel Finder scegli **Unisci** per `data`, mai **Sostituisci**,
+  che cancellerebbe i salvataggi:
+  ```sh
+  ditto ~/Downloads/azimuth-windows "$HOME/Library/Application Support/CrossOver/Bottles/<bottle>/drive_c/<cartella>"
+  ```
+- oppure installalo in una **cartella o bottle nuova** (passi sopra) e copia `data/titles` dalla
+  cartella vecchia prima del primo avvio:
+  ```sh
+  B="$HOME/Library/Application Support/CrossOver/Bottles"
+  ditto "$B/<bottle vecchia>/drive_c/<cartella vecchia>/data/titles" "$B/<bottle nuova>/drive_c/<cartella nuova>/data/titles"
+  ```
+
+Poi apri FH2 Port tenendo premuto **Opzione** e scegli la cartella nuova se è cambiata: l'app ci
+installa il layer. Aggiornare FH2 Port non tocca mai i salvataggi. Copiare prima `data/titles` da
+un'altra parte è un backup che costa poco.
 
 ### Installazione a mano
 
