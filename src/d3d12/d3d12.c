@@ -1400,13 +1400,62 @@ typedef HRESULT (STDMETHODCALLTYPE *create_committed1_fn)(ID3D12Device *, const 
                                                           const D3D12_CLEAR_VALUE *, ID3D12ProtectedResourceSession *,
                                                           REFIID, void **);
 
+/* Apple GPUs take at most 4 samples per pixel; the car showroom asks for 8 and
+ * the wrapper stops when the host has no 8x. With FH2_MSAA8 on (the default)
+ * 8x is reported as supported and every 8x resource and pipeline is made 4x
+ * instead, so the showroom renders with less anti-aliasing. msaa_host is the
+ * most samples the host takes (0: not asked yet, 16: no cap needed). */
+static BOOL msaa_cap = TRUE;
+static volatile LONG msaa_host;
+static HRESULT (STDMETHODCALLTYPE *real_check_feature)(ID3D12Device *, D3D12_FEATURE, void *, UINT);
+
+static LONG host_samples(ID3D12Device *dev)
+{
+    D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS q = {DXGI_FORMAT_R16G16B16A16_FLOAT, 8, 0, 0};
+    LONG host = 16;
+    if (msaa_host || !dev || !real_check_feature) return msaa_host ? msaa_host : 16;
+    if (SUCCEEDED(real_check_feature(dev, D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS, &q, sizeof(q))) && !q.NumQualityLevels) {
+        q.SampleCount = 4;
+        if (SUCCEEDED(real_check_feature(dev, D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS, &q, sizeof(q))) && q.NumQualityLevels)
+            host = 4;
+    }
+    if (!InterlockedCompareExchange(&msaa_host, host, 0) && host == 4)
+        logmsg("MSAA: the host takes no 8 samples, 8x targets and pipelines are made 4x (FH2_MSAA8=0 turns this off)");
+    return msaa_host;
+}
+
+static const D3D12_RESOURCE_DESC *cap_resource(ID3D12Device *dev, const D3D12_RESOURCE_DESC *d, D3D12_RESOURCE_DESC *tmp)
+{
+    if (!msaa_cap || !d || d->SampleDesc.Count <= 4 || d->SampleDesc.Count <= (UINT)host_samples(dev)) return d;
+    *tmp = *d;
+    tmp->SampleDesc.Count = msaa_host;
+    tmp->SampleDesc.Quality = 0;
+    return tmp;
+}
+
+/* MSAA diagnostics: every multisampled resource and every failed creation, so the
+ * log shows what the game asks for right before Azimuth gives up on it */
+static void log_resource(const char *what, const D3D12_RESOURCE_DESC *desc, HRESULT hr)
+{
+    static volatile LONG nms, nfail;
+    if (!desc) return;
+    if (FAILED(hr) ? InterlockedIncrement(&nfail) > 64 : desc->SampleDesc.Count <= 1 || InterlockedIncrement(&nms) > 64) return;
+    logmsg("%s dim %u %llux%u x%u mips %u fmt %u samples %u/%u flags %#x layout %u -> %#lx", what,
+           desc->Dimension, desc->Width, desc->Height, desc->DepthOrArraySize, desc->MipLevels, desc->Format,
+           desc->SampleDesc.Count, desc->SampleDesc.Quality, desc->Flags, desc->Layout, hr);
+}
+
 static HRESULT STDMETHODCALLTYPE hk_create_committed(ID3D12Device *dev, const D3D12_HEAP_PROPERTIES *hp, D3D12_HEAP_FLAGS f,
                                                      const D3D12_RESOURCE_DESC *desc, D3D12_RESOURCE_STATES st,
                                                      const D3D12_CLEAR_VALUE *cv, REFIID riid, void **ppv)
 {
+    D3D12_RESOURCE_DESC capped;
     LONG64 t0 = slow_start();
-    HRESULT hr = ((create_committed_fn)dev_vt_orig[27])(dev, hp, f, desc, st, cv, riid, ppv);
+    HRESULT hr;
+    desc = cap_resource(dev, desc, &capped);
+    hr = ((create_committed_fn)dev_vt_orig[27])(dev, hp, f, desc, st, cv, riid, ppv);
     slow_end("CreateCommittedResource", t0);
+    log_resource("CreateCommittedResource", desc, hr);
     if (SUCCEEDED(hr) && ppv) record_buffer(*ppv, desc);
     return hr;
 }
@@ -1427,9 +1476,13 @@ static HRESULT STDMETHODCALLTYPE hk_create_committed1(ID3D12Device *dev, const D
                                                       const D3D12_CLEAR_VALUE *cv, ID3D12ProtectedResourceSession *ps,
                                                       REFIID riid, void **ppv)
 {
+    D3D12_RESOURCE_DESC capped;
     LONG64 t0 = slow_start();
-    HRESULT hr = ((create_committed1_fn)dev_vt_orig[53])(dev, hp, f, desc, st, cv, ps, riid, ppv);
+    HRESULT hr;
+    desc = cap_resource(dev, desc, &capped);
+    hr = ((create_committed1_fn)dev_vt_orig[53])(dev, hp, f, desc, st, cv, ps, riid, ppv);
     slow_end("CreateCommittedResource1", t0);
+    log_resource("CreateCommittedResource1", desc, hr);
     if (SUCCEEDED(hr) && ppv) record_buffer(*ppv, desc);
     return hr;
 }
@@ -1553,6 +1606,17 @@ static void census_layout(const D3D12_GRAPHICS_PIPELINE_STATE_DESC *d)
         }
     }
 }
+/* the pipeline side of the 8x -> 4x cap: its sample count must match the targets' */
+static const D3D12_GRAPHICS_PIPELINE_STATE_DESC *cap_pipeline(ID3D12Device *dev, const D3D12_GRAPHICS_PIPELINE_STATE_DESC *d,
+                                                             D3D12_GRAPHICS_PIPELINE_STATE_DESC *tmp)
+{
+    if (!msaa_cap || !d || d->SampleDesc.Count <= 4 || d->SampleDesc.Count <= (UINT)host_samples(dev)) return d;
+    if (d != tmp) *tmp = *d;
+    tmp->SampleDesc.Count = msaa_host;
+    tmp->SampleDesc.Quality = 0;
+    return tmp;
+}
+
 typedef void (STDMETHODCALLTYPE *create_srv_fn)(ID3D12Device *, ID3D12Resource *, const D3D12_SHADER_RESOURCE_VIEW_DESC *,
                                                 D3D12_CPU_DESCRIPTOR_HANDLE);
 
@@ -1561,6 +1625,7 @@ static HRESULT STDMETHODCALLTYPE hk_create_gpso(ID3D12Device *dev, const D3D12_G
     D3D12_GRAPHICS_PIPELINE_STATE_DESC tmp;
     D3D12_INPUT_ELEMENT_DESC els[D3D12_IA_VERTEX_INPUT_STRUCTURE_ELEMENT_COUNT];
     const D3D12_GRAPHICS_PIPELINE_STATE_DESC *d = fix_layout(d0, &tmp, els, D3D12_IA_VERTEX_INPUT_STRUCTURE_ELEMENT_COUNT);
+    d = cap_pipeline(dev, d, &tmp);
     census_layout(d0);
     {
         LONG64 t0 = slow_start();
@@ -1585,10 +1650,11 @@ static HRESULT STDMETHODCALLTYPE hk_lib_load_gpso(ID3D12PipelineLibrary *lib, LP
     D3D12_GRAPHICS_PIPELINE_STATE_DESC tmp;
     D3D12_INPUT_ELEMENT_DESC els[D3D12_IA_VERTEX_INPUT_STRUCTURE_ELEMENT_COUNT];
     const D3D12_GRAPHICS_PIPELINE_STATE_DESC *d = fix_layout(d0, &tmp, els, D3D12_IA_VERTEX_INPUT_STRUCTURE_ELEMENT_COUNT);
+    d = cap_pipeline(the_device, d, &tmp);
     HRESULT hr;
     LONG64 t0 = slow_start();
-    /* the library holds the PSO compiled from the original layout, so a fixed one
-     * is compiled afresh instead of loaded */
+    /* the library holds the PSO compiled from the original layout and sample
+     * count, so a fixed one is compiled afresh instead of loaded */
     if (d != d0 && the_device) {
         tmp.CachedPSO.pCachedBlob = NULL;
         tmp.CachedPSO.CachedBlobSizeInBytes = 0;
@@ -1660,6 +1726,19 @@ static BOOL hide_tiled;
 static HRESULT STDMETHODCALLTYPE hk_check_feature(ID3D12Device *dev, D3D12_FEATURE feature, void *data, UINT size)
 {
     HRESULT hr = ((check_feature_fn)dev_vt_orig[13])(dev, feature, data, size);
+    if (feature == D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS && data && size >= sizeof(D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS)) {
+        static volatile LONG n;
+        D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS *m = data;
+        if (InterlockedIncrement(&n) <= 64)
+            logmsg("CheckFeatureSupport(MULTISAMPLE_QUALITY_LEVELS): fmt %u samples %u flags %#x -> hr %#lx levels %u",
+                   m->Format, m->SampleCount, m->Flags, hr, SUCCEEDED(hr) ? m->NumQualityLevels : 0);
+        if (msaa_cap && SUCCEEDED(hr) && !m->NumQualityLevels && m->SampleCount > 4 && host_samples(dev) == 4) {
+            D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS four = *m;
+            four.SampleCount = 4;
+            if (SUCCEEDED(real_check_feature(dev, feature, &four, sizeof(four))) && four.NumQualityLevels)
+                m->NumQualityLevels = 1;
+        }
+    }
     if (feature == D3D12_FEATURE_EXISTING_HEAPS && data && size >= sizeof(D3D12_FEATURE_DATA_EXISTING_HEAPS)) {
         D3D12_FEATURE_DATA_EXISTING_HEAPS *e = data;
         if (FAILED(hr) || !e->Supported)
@@ -1749,9 +1828,13 @@ static HRESULT STDMETHODCALLTYPE hk_create_placed(ID3D12Device *dev, ID3D12Heap 
     ID3D12Resource *res = NULL;
     region *h = NULL, *g;
     uint8_t *ptr = NULL;
+    D3D12_RESOURCE_DESC capped;
     LONG64 t0 = slow_start();
-    HRESULT hr = ((create_placed_fn)dev_vt_orig[29])(dev, heap, offset, desc, state, clear, riid, ppv);
+    HRESULT hr;
+    desc = cap_resource(dev, desc, &capped);
+    hr = ((create_placed_fn)dev_vt_orig[29])(dev, heap, offset, desc, state, clear, riid, ppv);
     slow_end("CreatePlacedResource", t0);
+    log_resource("CreatePlacedResource", desc, hr);
 
     if (FAILED(hr) || !ppv || !*ppv) return hr;
     record_buffer(*ppv, desc);
@@ -2199,6 +2282,7 @@ static void hook_device(void *device)
         dev_vt[12] = (void *)hk_create_list;
         dev_vt[18] = (void *)hk_create_srv;
         dev_vt[13] = (void *)hk_check_feature;
+        real_check_feature = dev_vt_orig[13];
         dev_vt[41] = (void *)hk_create_signature;
         dev_vt[44] = (void *)hk_create_lib;
         dev_vt[27] = (void *)hk_create_committed;
@@ -4538,6 +4622,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
     {
         char v[8] = "";
         hide_tiled = !(GetEnvironmentVariableA("FH2_TILED", v, sizeof(v)) && v[0] == '1');
+        msaa_cap = !(GetEnvironmentVariableA("FH2_MSAA8", v, sizeof(v)) && v[0] == '0');
         skip_vid = GetEnvironmentVariableA("FH2_SKIP_VID", v, sizeof(v)) && v[0] == '1';
         logmsg("skip base-vertex draws on vertex_id PSOs: %s", skip_vid ? "yes" : "no");
         skip_ei = GetEnvironmentVariableA("FH2_SKIP_EI", v, sizeof(v)) && v[0] == '1';
