@@ -33,6 +33,14 @@ Free roam, races, menus, audio, controllers and keyboard work.
 
 ### What's new
 
+- **0.1.8**: with anti-aliasing on, the **car customisation, purchase and upgrade screens no longer
+  stop the game** (issue #15). The showroom asks for 8x MSAA targets; Apple GPUs take at most 4x,
+  so D3DMetal offers no 8x and Azimuth stopped with "the host takes no 8 samples of format 10". The
+  layer now creates those targets and their pipelines with 4 samples (`FH2_MSAA8=0` turns this
+  off). MSAA still draws dashes in the sky, so anti-aliasing off stays the recommended setting.
+  - The fiber fix finds its sites at run time and also knows **Forza Horizon 2 Presents Fast &
+    Furious, Forza Horizon 3, Forza Motorsport 5 and 6** (PR #3 by @danielgpinheiro; only Forza
+    Horizon 2 tested here).
 - **0.1.7**: **Azimuth 1.0.x** works (it froze after a few minutes, issue #14), and the **stutter
   near buildings is gone**.
   - Azimuth 1.0 drives two GPU queues at once. The layer held every queue's signals with one
@@ -189,7 +197,9 @@ Keys count only while the game window has focus; keyboard and controllers work t
   `fh2port.log`.
 - If the picture stops on **"Press RT to accelerate"** in the intro while the music goes on, the
   game is waiting for RT: check that the controller is on, or click the game window and hold W.
-- MSAA must stay off. The intro movies play (no intro skip).
+- **MSAA** (anti-aliasing 2x/4x in Azimuth's settings) draws dashes in the sky on D3DMetal: keep
+  it off and use a render height above your screen's instead ("supersampled"). Since 0.1.8 it no
+  longer stops the game in the car screens. The intro movies play (no intro skip).
 
 ### Debugging
 
@@ -202,7 +212,8 @@ and completion), `FH2_FLUSH=real|0|nolock|skip` (Wine's real flush, serialized a
 flush fix off / timed without the lock / replaced by a local fence, diagnostic only), `FH2_PLACE=0`
 (leave address placement to Wine), `FH2_VMSTATS=12` (every 10 s: virtual memory calls, their cost,
 shapes and callers), `FH2_QUIET=1` (no periodic log lines, control file not polled),
-`FH2_PRIO=<n>` (Windows priority threads are raised to; default 1, `0` leaves them alone).
+`FH2_PRIO=<n>` (Windows priority threads are raised to; default 1, `0` leaves them alone),
+`FH2_MSAA8=0` (8x MSAA targets passed to D3DMetal as they are, which stops the car screens).
 Calls into D3DMetal slower than 4 ms are logged as `slow:`. Live commands go through `data/logs/fh2port.ctl` (`top`, `reset`, `dump N`,
 `tint …`, `tintlist`, `tintset …`, `watch …`, `patch on|off`, `stacks` for the Windows-side call
 stack of every thread, useful when the game hangs).
@@ -231,6 +242,15 @@ Sviluppato e provato su MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver su Win
 
 ### Novità
 
+- **0.1.8**: con l'anti-aliasing attivo, **le schermate di personalizzazione, acquisto e
+  potenziamento auto non fermano più il gioco** (issue #15). Lo showroom chiede target MSAA 8x; le
+  GPU Apple arrivano a 4x, quindi D3DMetal non offre l'8x e Azimuth si fermava con "the host takes
+  no 8 samples of format 10". Ora il layer crea quei target e le loro pipeline a 4 campioni
+  (`FH2_MSAA8=0` lo disattiva). L'MSAA disegna ancora trattini nel cielo, quindi resta consigliato
+  tenere l'anti-aliasing spento.
+  - La correzione delle fiber trova i punti da sola e riconosce anche **Forza Horizon 2 Presents
+    Fast & Furious, Forza Horizon 3, Forza Motorsport 5 e 6** (PR #3 di @danielgpinheiro; qui è
+    stato provato solo Forza Horizon 2).
 - **0.1.7**: **Azimuth 1.0.x** funziona (si bloccava dopo pochi minuti, issue #14) e **gli scatti
   vicino ai palazzi sono spariti**.
   - Azimuth 1.0 usa due code della GPU insieme. Il layer tratteneva i signal di tutte le code con un
@@ -379,7 +399,10 @@ insieme. `FH2_KEYBOARD=0` lascia i gamepad di Wine come sono.
   `fh2port.log`.
 - Se nell'intro l'immagine si ferma su **"Premi RT per accelerare"** mentre la musica continua, il
   gioco aspetta RT: controlla che il controller sia acceso, oppure clicca la finestra del gioco e tieni premuto W.
-- L'MSAA va lasciato spento. I filmati iniziali vengono riprodotti (niente salto dell'intro).
+- **MSAA** (anti-aliasing 2x/4x nelle impostazioni di Azimuth): su D3DMetal disegna trattini nel
+  cielo. Tienilo spento e usa invece un'altezza di rendering superiore a quella dello schermo
+  ("supersampled"). Dalla 0.1.8 non ferma più il gioco nelle schermate auto. I filmati iniziali
+  vengono riprodotti (niente salto dell'intro).
 
 ### Licenza
 
