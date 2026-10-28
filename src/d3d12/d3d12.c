@@ -2332,6 +2332,15 @@ static volatile LONG fiber_patching;
 static uint8_t *volatile fiber_game;
 static const struct game_image *volatile fiber_image;
 
+/* the exception handler reads fiber_game first and then fiber_image: publish the
+ * image first, so a handler that sees the game never sees it without its size */
+static void publish_fiber_game(uint8_t *game, const struct game_image *which)
+{
+    fiber_image = which;
+    MemoryBarrier();
+    fiber_game = game;
+}
+
 static const uint8_t fiber_pad[16] = {0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
                                       0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc};
 
@@ -2432,8 +2441,11 @@ static LONG WINAPI fiber_fault_handler(EXCEPTION_POINTERS *ep)
                        &c->R9, &c->R10, &c->R11, &c->R12, &c->R13, &c->R14, &c->R15};
     DWORD64 bad, good, addr;
     uint8_t *game = fiber_game;
-    const struct game_image *which = fiber_image;
+    const struct game_image *which;
     int fixed = 0;
+    MemoryBarrier();   /* pairs with publish_fiber_game: image first, then game */
+    which = fiber_image;
+    if (!which) game = NULL;
     if (er->ExceptionCode != EXCEPTION_ACCESS_VIOLATION || er->NumberParameters < 2) return EXCEPTION_CONTINUE_SEARCH;
     /* cheap checks first: other access violations must not pay for the image search */
     bad = __readgsqword(0x20);
@@ -2445,8 +2457,7 @@ static LONG WINAPI fiber_fault_handler(EXCEPTION_POINTERS *ep)
     for (size_t i = 0; i < sizeof(regs) / sizeof(regs[0]); i++)
         if (*regs[i] == bad) { *regs[i] = good; fixed++; }
     if (!fixed) return EXCEPTION_CONTINUE_SEARCH;
-    fiber_game = game;
-    fiber_image = which;
+    publish_fiber_game(game, which);
     patch_fiber_sites(game, which);   /* everything still unpatched */
     logmsg("fiber fix: caught a fiber read before the patch at game+%#llx, %d register(s) corrected",
            (unsigned long long)(c->Rip - (DWORD64)(uintptr_t)game), fixed);
@@ -2463,8 +2474,7 @@ static DWORD WINAPI game_fixup_thread(void *arg)
     /* the launcher can stay open for minutes before the game is mapped */
     while (GetTickCount() - start < 1800000) {
         if (!game && (game = find_game_image(&which))) {
-            fiber_game = game;
-            fiber_image = which;
+            publish_fiber_game(game, which);
             found = GetTickCount();
             logmsg("game image found at %p after %lu ms (%s)", game, found - start, which->name);
         }
