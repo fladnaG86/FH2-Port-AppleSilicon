@@ -249,8 +249,10 @@ Sviluppato e provato su MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver su Win
   (`FH2_MSAA8=0` lo disattiva). L'MSAA disegna ancora trattini nel cielo, quindi resta consigliato
   tenere l'anti-aliasing spento.
   - La correzione delle fiber trova i punti da sola e riconosce anche **Forza Horizon 2 Presents
-    Fast & Furious, Forza Horizon 3, Forza Motorsport 5 e 6** (PR #3 di @danielgpinheiro; qui è
-    stato provato solo Forza Horizon 2).
+    Fast & Furious, Forza Horizon 3, Forza Motorsport 5 e 6** (PR #3 di @danielgpinheiro). **Avvio
+    di Forza Motorsport 6 fixato**: con questo layer parte su M1 Max con Azimuth 1.0.2 (prima
+    crashava sullo splash leggendo `0x8ff`). Qui sono stati provati Forza Horizon 2 e Forza
+    Motorsport 6.
 - **0.1.7**: **Azimuth 1.0.x** funziona (si bloccava dopo pochi minuti, issue #14) e **gli scatti
   vicino ai palazzi sono spariti**.
   - Azimuth 1.0 usa due code della GPU insieme. Il layer tratteneva i signal di tutte le code con un
