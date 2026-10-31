@@ -40,8 +40,9 @@ Free roam, races, menus, audio, controllers and keyboard work.
   off). MSAA still draws dashes in the sky, so anti-aliasing off stays the recommended setting.
   - The fiber fix finds its sites at run time and also knows **Forza Horizon 2 Presents Fast &
     Furious, Forza Horizon 3, Forza Motorsport 5 and 6** (PR #3 by @danielgpinheiro). **Forza
-    Motorsport 6 startup fixed**: with this layer it starts on an M1 Max with Azimuth 1.0.2 (before
-    it crashed on the splash, reading `0x8ff`). Forza Horizon 2 and Forza Motorsport 6 tested here.
+    Motorsport 6 is playable**: with this layer it starts and was played on an M1 Max with Azimuth
+    1.0.2 (before it crashed on the splash, reading `0x8ff`). Forza Horizon 2 and Forza Motorsport 6
+    tested here.
 - **0.1.7**: **Azimuth 1.0.x** works (it froze after a few minutes, issue #14), and the **stutter
   near buildings is gone**.
   - Azimuth 1.0 drives two GPU queues at once. The layer held every queue's signals with one
@@ -240,6 +241,7 @@ Sviluppato e provato su MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver su Win
 4.0b3 e Azimuth 1.0.2 (anche la 0.9.10 parte con questo layer, ma la 0.1.7 è stata giocata solo sulla
 1.0.2). Mondo aperto, gare, menu, audio, controller e tastiera funzionano; con Azimuth a 60 fps e
 1440 righe il gioco sta intorno ai 60 fps ([video](https://github.com/fladnaG86/FH2-Port-AppleSilicon/releases/tag/video)).
+**Anche Forza Motorsport 6 (1.0.0.44) è giocabile**: giocato qui con lo stesso layer su Azimuth 1.0.2.
 
 ### Novità
 
@@ -250,9 +252,9 @@ Sviluppato e provato su MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver su Win
   (`FH2_MSAA8=0` lo disattiva). L'MSAA disegna ancora trattini nel cielo, quindi resta consigliato
   tenere l'anti-aliasing spento.
   - La correzione delle fiber trova i punti da sola e riconosce anche **Forza Horizon 2 Presents
-    Fast & Furious, Forza Horizon 3, Forza Motorsport 5 e 6** (PR #3 di @danielgpinheiro). **Avvio
-    di Forza Motorsport 6 fixato**: con questo layer parte su M1 Max con Azimuth 1.0.2 (prima
-    crashava sullo splash leggendo `0x8ff`). Qui sono stati provati Forza Horizon 2 e Forza
+    Fast & Furious, Forza Horizon 3, Forza Motorsport 5 e 6** (PR #3 di @danielgpinheiro). **Forza
+    Motorsport 6 è giocabile**: con questo layer parte ed è stato giocato su M1 Max con Azimuth 1.0.2
+    (prima crashava sullo splash leggendo `0x8ff`). Qui sono stati provati Forza Horizon 2 e Forza
     Motorsport 6.
 - **0.1.7**: **Azimuth 1.0.x** funziona (si bloccava dopo pochi minuti, issue #14) e **gli scatti
   vicino ai palazzi sono spariti**.
