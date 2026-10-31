@@ -39,8 +39,9 @@ Free roam, races, menus, audio, controllers and keyboard work.
   layer now creates those targets and their pipelines with 4 samples (`FH2_MSAA8=0` turns this
   off). MSAA still draws dashes in the sky, so anti-aliasing off stays the recommended setting.
   - The fiber fix finds its sites at run time and also knows **Forza Horizon 2 Presents Fast &
-    Furious, Forza Horizon 3, Forza Motorsport 5 and 6** (PR #3 by @danielgpinheiro; only Forza
-    Horizon 2 tested here).
+    Furious, Forza Horizon 3, Forza Motorsport 5 and 6** (PR #3 by @danielgpinheiro). **Forza
+    Motorsport 6 startup fixed**: with this layer it starts on an M1 Max with Azimuth 1.0.2 (before
+    it crashed on the splash, reading `0x8ff`). Forza Horizon 2 and Forza Motorsport 6 tested here.
 - **0.1.7**: **Azimuth 1.0.x** works (it froze after a few minutes, issue #14), and the **stutter
   near buildings is gone**.
   - Azimuth 1.0 drives two GPU queues at once. The layer held every queue's signals with one
