@@ -29,7 +29,8 @@ only adds layers *underneath* it, the way DXVK or vkd3d sit under a game:
 
 Developed and tested on a MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver on Wine 11 with
 GPTK 4.0b3 and Azimuth 1.0.2 (0.9.10 starts with this layer too, but 0.1.7 was played on 1.0.2 only).
-Free roam, races, menus, audio, controllers and keyboard work.
+Free roam, races, menus, audio, controllers and keyboard work. **Forza Motorsport 6 (1.0.0.44) is
+playable too**: played here with the same layer on Azimuth 1.0.2.
 
 ### What's new
 
