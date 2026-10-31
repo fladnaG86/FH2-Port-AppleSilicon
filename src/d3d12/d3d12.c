@@ -274,6 +274,9 @@ typedef struct {
     HANDLE sem;
     imm_write *staged;
     UINT nstaged, capstaged;
+    volatile LONG64 want;        /* the GPU value the worker is after */
+    volatile LONG64 got;         /* the last value the fence reported */
+    volatile LONG state;         /* 0 idle, 1 waiting for the fence, 2 inside a D3D call */
 } qstate;
 static qstate qstates[MAX_QUEUES];
 static volatile LONG nqueues;
@@ -286,6 +289,14 @@ static qstate *find_qstate(ID3D12CommandQueue *q)
 }
 
 static void poll_control(void);
+
+/* How long the signal worker waits for the GPU fence of a queue before it releases the
+ * game's fence anyway.  Waiting forever means that a GPU that never signals that fence
+ * (a Present that never completes, for instance) freezes the game for good: the game
+ * waits on its own fence, the worker waits on ours, and neither ever moves.
+ * FH2_FENCE_WAIT=<ms> lowers the wait; 0 means "do not wait at all" (diagnostic). */
+static DWORD fence_wait_ms = INFINITE;
+static BOOL fence_trace;
 
 static DWORD WINAPI signal_worker(void *arg)
 {
@@ -306,10 +317,34 @@ static DWORD WINAPI signal_worker(void *arg)
         if (!qs->head) qs->tail = NULL;
         LeaveCriticalSection(&qs->cs);
 
-        if (ID3D12Fence_GetCompletedValue(j->gpu_fence) < j->gpu_value) {
-            ID3D12Fence_SetEventOnCompletion(j->gpu_fence, j->gpu_value, ev);
-            WaitForSingleObject(ev, INFINITE);
+        qs->want = (LONG64)j->gpu_value;
+        qs->state = 2;
+        if (fence_trace) logmsg("fence: reading the completed value of %p (want %llu)", (void *)j->gpu_fence,
+                                (unsigned long long)j->gpu_value);
+        {
+            UINT64 cv = ID3D12Fence_GetCompletedValue(j->gpu_fence);
+            qs->got = (LONG64)cv;
+            if (fence_trace) logmsg("fence: %p completed %llu (want %llu)", (void *)j->gpu_fence,
+                                    (unsigned long long)cv, (unsigned long long)j->gpu_value);
+            if (cv < j->gpu_value) {
+                qs->state = 1;
+                if (fence_trace) logmsg("fence: SetEventOnCompletion %p at %llu", (void *)j->gpu_fence,
+                                        (unsigned long long)j->gpu_value);
+                ID3D12Fence_SetEventOnCompletion(j->gpu_fence, j->gpu_value, ev);
+                if (fence_trace) logmsg("fence: SetEventOnCompletion returned");
+                if (fence_wait_ms != 0) {
+                    DWORD wr = WaitForSingleObject(ev, fence_wait_ms);
+                    if (wr != WAIT_OBJECT_0)
+                        logmsg("gpu fence %p stuck at %llu (wanted %llu) after %ld ms: releasing the game's fence %p=%llu anyway",
+                               (void *)j->gpu_fence, (unsigned long long)ID3D12Fence_GetCompletedValue(j->gpu_fence),
+                               (unsigned long long)j->gpu_value, (long)fence_wait_ms, (void *)j->fence,
+                               (unsigned long long)j->value);
+                }
+                qs->state = 0;
+            }
         }
+        if (fence_trace) logmsg("fence: releasing the game's fence %p=%llu", (void *)j->fence,
+                                (unsigned long long)j->value);
         for (UINT i = 0; i < j->nw; i++) {
             InterlockedExchange(j->w[i].dst, j->w[i].value);
             label_note(&j->w[i], TRUE);
@@ -330,8 +365,23 @@ static DWORD WINAPI signal_worker(void *arg)
     return 0;
 }
 
-/* ---------------- queue hooks ---------------- */
+/* Where every queue's worker is, so that a stall can be read from the log alone.
+ * FH2_FENCE_TRACE=1 turns the heartbeat and the fence trace on. */
+static DWORD WINAPI queue_heartbeat(void *arg)
+{
+    for (;;) {
+        Sleep(5000);
+        if (!fence_trace) continue;
+        for (LONG i = 0; i < nqueues; i++) {
+            qstate *qs = &qstates[i];
+            logmsg("queue %ld: worker %ld (0 idle, 1 waiting for the fence, 2 inside a D3D call), wants %lld, the fence says %lld, %s",
+                   i, qs->state, qs->want, qs->got, qs->head ? "jobs left" : "no jobs left");
+        }
+    }
+    return 0;
+}
 
+/* ---------------- queue hooks ---------------- */
 typedef void (STDMETHODCALLTYPE *execute_fn)(ID3D12CommandQueue *, UINT, ID3D12CommandList *const *);
 typedef HRESULT (STDMETHODCALLTYPE *signal_fn)(ID3D12CommandQueue *, ID3D12Fence *, UINT64);
 
@@ -4666,6 +4716,20 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
             CloseHandle(CreateThread(NULL, 0, prio_thread, NULL, 0, NULL));
         flush_nolock = GetEnvironmentVariableA("FH2_FLUSH", v, sizeof(v)) && !strcmp(v, "nolock");
         flush_skip = GetEnvironmentVariableA("FH2_FLUSH", v, sizeof(v)) && !strcmp(v, "skip");
+        {
+            char fv[16] = "";
+            if (GetEnvironmentVariableA("FH2_FENCE_WAIT", fv, sizeof(fv)) && fv[0]) {
+                long ms = atol(fv);
+                if (ms < 0) ms = 0;
+                fence_wait_ms = (DWORD)ms;
+                logmsg("gpu fence wait: %ld ms%s", ms, ms ? "" : " (no wait at all, diagnostic)");
+            }
+            fence_trace = GetEnvironmentVariableA("FH2_FENCE_TRACE", fv, sizeof(fv)) && fv[0] == '1';
+            if (fence_trace) {
+                logmsg("fence trace on");
+                CloseHandle(CreateThread(NULL, 0, queue_heartbeat, NULL, 0, NULL));
+            }
+        }
         if (!(GetEnvironmentVariableA("FH2_FLUSH", v, sizeof(v)) && !strcmp(v, "real"))) {
             flush_page = VirtualAlloc(NULL, FLUSH_PAGE_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_NOACCESS);
             if (!flush_page) logmsg("flush: VirtualAlloc failed, using the real call");
