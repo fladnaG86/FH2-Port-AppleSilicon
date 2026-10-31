@@ -40,6 +40,11 @@ static FILE *logf;
 static CRITICAL_SECTION log_cs;
 /* FH2_QUIET=1: no periodic draws/stats lines and no control file polling (stutter test) */
 static BOOL quiet;
+/* FH2_MIN=1: minimal mode. No D3D12 interception at all: the device is the real one,
+ * untouched, so a complete D3D12 implementation (vkd3d-proton, DXVK) drives the game
+ * as it is. The fiber fix and the ntdll hooks (FlushProcessWriteBuffers, address
+ * placement) stay on: they fix Wine on macOS, not D3DMetal. */
+static BOOL minimal;
 
 static void logmsg(const char *fmt, ...)
 {
@@ -3185,7 +3190,10 @@ static BOOL resolve_passthrough(HMODULE real)
 HRESULT WINAPI proxy_create_device(IUnknown *adapter, D3D_FEATURE_LEVEL level, REFIID riid, void **ppv)
 {
     HRESULT hr = real_create_device(adapter, level, riid, ppv);
-    if (SUCCEEDED(hr) && ppv && *ppv) hook_device(*ppv);
+    if (SUCCEEDED(hr) && ppv && *ppv) {
+        if (minimal) logmsg("minimal mode: the real device is used as it is");
+        else hook_device(*ppv);
+    }
     return hr;
 }
 
@@ -4621,6 +4629,8 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
     resolve_passthrough(real);
     {
         char v[8] = "";
+        minimal = GetEnvironmentVariableA("FH2_MIN", v, sizeof(v)) && v[0] == '1';
+        logmsg("minimal mode: %s", minimal ? "on (no D3D12 interception)" : "off");
         hide_tiled = !(GetEnvironmentVariableA("FH2_TILED", v, sizeof(v)) && v[0] == '1');
         msaa_cap = !(GetEnvironmentVariableA("FH2_MSAA8", v, sizeof(v)) && v[0] == '0');
         skip_vid = GetEnvironmentVariableA("FH2_SKIP_VID", v, sizeof(v)) && v[0] == '1';

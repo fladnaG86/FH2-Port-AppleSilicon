@@ -216,7 +216,7 @@ flush fix off / timed without the lock / replaced by a local fence, diagnostic o
 (leave address placement to Wine), `FH2_VMSTATS=12` (every 10 s: virtual memory calls, their cost,
 shapes and callers), `FH2_QUIET=1` (no periodic log lines, control file not polled),
 `FH2_PRIO=<n>` (Windows priority threads are raised to; default 1, `0` leaves them alone),
-`FH2_MSAA8=0` (8x MSAA targets passed to D3DMetal as they are, which stops the car screens).
+`FH2_MSAA8=0` (8x MSAA targets passed to D3DMetal as they are, which stops the car screens). `FH2_MIN=1` (minimal mode: no D3D12 interception at all, the layer only does the fiber fix and the Wine-level fixes; for a complete D3D12 implementation under it, such as vkd3d-proton, whose D3DMetal workarounds do not apply).
 Calls into D3DMetal slower than 4 ms are logged as `slow:`. Live commands go through `data/logs/fh2port.ctl` (`top`, `reset`, `dump N`,
 `tint …`, `tintlist`, `tintset …`, `watch …`, `patch on|off`, `stacks` for the Windows-side call
 stack of every thread, useful when the game hangs).
