@@ -8,7 +8,7 @@
 # What it changes, all outside the wrapper's own files:
 #   - copies build/d3d12.dll and build/fh2pad.dll next to azimuth.exe
 #   - per-application DLL overrides for azimuth.exe (d3d12 native then builtin,
-#     d3dcompiler_47 and the VC++ 2012 runtime native)
+#     d3dcompiler_47 and the VC++ 2012 and VC14 runtimes native)
 #   - registers fh2pad.dll as the provider of Windows.Gaming.Input.Gamepad
 #   - WineBus DisableHidraw=1, so a DualSense is seen as a gamepad
 #   - with --settings: antialiasing=off, resolution=1440 in data/azimuth.ini
@@ -60,6 +60,11 @@ reg add "$APPKEY" /v d3d12 /t REG_SZ /d 'native,builtin' /f
 reg add "$APPKEY" /v d3dcompiler_47 /t REG_SZ /d 'native,builtin' /f
 reg add "$APPKEY" /v msvcr110 /t REG_SZ /d native /f
 reg add "$APPKEY" /v msvcp110 /t REG_SZ /d native /f
+# Azimuth 1.0 keeps a private VC14 runtime in data/bin and refuses Wine's builtin
+# one when a C++/CX title starts (FH3); builtin stays as fallback for 0.9.10
+for dll in vcruntime140 vcruntime140_1 msvcp140 concrt140; do
+  reg add "$APPKEY" /v $dll /t REG_SZ /d 'native,builtin' /f
+done
 reg add "$PADKEY" /v DllPath /t REG_SZ /d "C:\\$WINDIR\\fh2pad.dll" /f
 reg add "$BUSKEY" /v DisableHidraw /t REG_DWORD /d 1 /f
 echo "layer installed in $A"

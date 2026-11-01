@@ -29,11 +29,16 @@ only adds layers *underneath* it, the way DXVK or vkd3d sit under a game:
 
 Developed and tested on a MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver on Wine 11 with
 GPTK 4.0b3 and Azimuth 1.0.2 (0.9.10 starts with this layer too, but 0.1.7 was played on 1.0.2 only).
-Free roam, races, menus, audio, controllers and keyboard work. **Forza Motorsport 6 (1.0.0.44) is
-playable too**: played here with the same layer on Azimuth 1.0.2.
+Free roam, races, menus, audio, controllers and keyboard work. **Forza Motorsport 6 (1.0.0.44) and
+Forza Horizon 3 (1.0.125.0) are playable too**: played here with the same layer on Azimuth 1.0.2.
 
 ### What's new
 
+- **0.1.9**: **Forza Horizon 3 starts and is playable** (1.0.125.0, played on an M1 Max with Azimuth
+  1.0.2). FH3 uses Azimuth's private VC14 runtime, which Wine replaced with its builtin DLLs, and
+  Azimuth stopped with "Private VC14 runtime was overridden". The install now sets `vcruntime140`,
+  `vcruntime140_1`, `msvcp140` and `concrt140` to native for `azimuth.exe`, and the app reinstalls
+  whenever its version changes, even if the layer DLLs did not.
 - **0.1.8**: with anti-aliasing on, the **car customisation, purchase and upgrade screens no longer
   stop the game** (issue #15). The showroom asks for 8x MSAA targets; Apple GPUs take at most 4x,
   so D3DMetal offers no 8x and Azimuth stopped with "the host takes no 8 samples of format 10". The
@@ -242,10 +247,16 @@ Sviluppato e provato su MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver su Win
 4.0b3 e Azimuth 1.0.2 (anche la 0.9.10 parte con questo layer, ma la 0.1.7 è stata giocata solo sulla
 1.0.2). Mondo aperto, gare, menu, audio, controller e tastiera funzionano; con Azimuth a 60 fps e
 1440 righe il gioco sta intorno ai 60 fps ([video](https://github.com/fladnaG86/FH2-Port-AppleSilicon/releases/tag/video)).
-**Anche Forza Motorsport 6 (1.0.0.44) è giocabile**: giocato qui con lo stesso layer su Azimuth 1.0.2.
+**Anche Forza Motorsport 6 (1.0.0.44) e Forza Horizon 3 (1.0.125.0) sono giocabili**: giocati qui con
+lo stesso layer su Azimuth 1.0.2.
 
 ### Novità
 
+- **0.1.9**: **Forza Horizon 3 parte ed è giocabile** (1.0.125.0, giocato su M1 Max con Azimuth 1.0.2).
+  FH3 usa il runtime VC14 privato di Azimuth, che Wine sostituiva con le sue DLL builtin, e Azimuth
+  si fermava con "Private VC14 runtime was overridden". Ora l'installazione imposta `vcruntime140`,
+  `vcruntime140_1`, `msvcp140` e `concrt140` su native per `azimuth.exe`, e l'app reinstalla a ogni
+  cambio di versione, anche se le DLL del layer non cambiano.
 - **0.1.8**: con l'anti-aliasing attivo, **le schermate di personalizzazione, acquisto e
   potenziamento auto non fermano più il gioco** (issue #15). Lo showroom chiede target MSAA 8x; le
   GPU Apple arrivano a 4x, quindi D3DMetal non offre l'8x e Azimuth si fermava con "the host takes

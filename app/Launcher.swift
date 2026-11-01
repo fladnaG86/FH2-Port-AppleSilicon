@@ -224,14 +224,17 @@ func ensureInstalled(_ t: Target) -> Bool {
     let ini = t.wrapperDir.appendingPathComponent("data/azimuth.ini")
     let settingsKey = "SettingsApplied:\(t.key)/\(t.folder)"
     let wantSettings = !defaults.bool(forKey: settingsKey) && FileManager.default.fileExists(atPath: ini.path)
-    if !stale && !wantSettings && defaults.string(forKey: "InstalledFor") == "\(t.key)/\(t.folder)" { return true }
+    // the version is part of the key: a release can change the install script alone
+    let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+    let installedFor = "\(t.key)/\(t.folder)/\(version)"
+    if !stale && !wantSettings && defaults.string(forKey: "InstalledFor") == installedFor { return true }
     let (status, out) = runScript("install.sh", wantSettings ? ["--settings"] : [], env: t.env)
     if status != 0 {
         _ = alert("Installation failed", String(out.suffix(800)))
         return false
     }
     if wantSettings { defaults.set(true, forKey: settingsKey) }
-    defaults.set("\(t.key)/\(t.folder)", forKey: "InstalledFor")
+    defaults.set(installedFor, forKey: "InstalledFor")
     if !FileManager.default.fileExists(atPath: t.wrapperDir.appendingPathComponent("d3dcompiler_47.dll").path) {
         _ = alert("d3dcompiler_47.dll is missing",
                   "The wrapper needs Microsoft's d3dcompiler_47.dll in \(t.folder). See the README for where to get it.")
