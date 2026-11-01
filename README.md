@@ -168,6 +168,15 @@ BOTTLE=<bottle> AZDIR=<folder> scripts/install.sh --settings
 BOTTLE=<bottle> AZDIR=<folder> scripts/run.sh    # MTL_HUD_ENABLED=1 for the Metal HUD
 ```
 
+Both scripts use **CrossOver Preview** when it is installed, even if `CROSSOVER` names the stable
+CrossOver: the port needs Wine 11.17 with D3DMetal 4.0b3, and 26.3 (Wine 11.0, D3DMetal 3.0) stops
+`azimuth.exe` before it writes a log. `run.sh` does not start `azimuth.exe` itself: the app it is
+usually called from exits as soon as the script returns, and macOS then tears that app's launchd job
+down and kills the child wine. The script registers the LaunchAgent
+`~/Library/LaunchAgents/io.github.fladnag86.fh2-port.run.plist` and kickstarts it; the agent runs
+`run.sh --agent`, which starts wine and stays alive until the wrapper is gone. Close Azimuth and the
+agent exits; the next `run.sh` (or the app) reuses it.
+
 `install.sh` copies the two DLLs next to `azimuth.exe`, adds per-application DLL overrides for
 `azimuth.exe` (`d3d12` native-then-builtin, `d3dcompiler_47` and the VC++ 2012 runtime native),
 registers `fh2pad.dll` for `Windows.Gaming.Input.Gamepad`, and sets WineBus `DisableHidraw=1` so a
@@ -383,6 +392,15 @@ un'altra parte è un backup che costa poco.
 Comandi nella sezione inglese: `make`, poi `scripts/install.sh --settings` e `scripts/run.sh` con
 `BOTTLE` e `AZDIR`. `install.sh --uninstall` annulla tutto; `tools/app/make_app.sh <versione>`
 costruisce app e DMG.
+
+Entrambi gli script usano **CrossOver Preview** quando è installato, anche se `CROSSOVER` indica il
+CrossOver stabile: il port vuole Wine 11.17 con D3DMetal 4.0b3, e la 26.3 (Wine 11.0, D3DMetal 3.0)
+ferma `azimuth.exe` prima che scriva un log. `run.sh` non avvia `azimuth.exe` direttamente: l'app da
+cui viene chiamato esce appena lo script ritorna, e macOS chiude il suo job di launchd uccidendo il
+wine figlio. Lo script registra il LaunchAgent
+`~/Library/LaunchAgents/io.github.fladnag86.fh2-port.run.plist` e lo avvia; l'agente esegue
+`run.sh --agent`, che lancia wine e resta vivo finché il wrapper c'è. Chiudi Azimuth e l'agente esce;
+il successivo `run.sh` (o l'app) lo riusa.
 
 ### Tastiera
 

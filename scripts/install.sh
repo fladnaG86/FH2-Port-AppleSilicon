@@ -20,8 +20,13 @@ AZDIR=${AZDIR:-Azimuth}
 HERE=${0:A:h:h}
 BUILD=${FH2_BUILD:-$HERE/build}
 WINDIR=${AZDIR//\//\\}   # C:\ path of the wrapper folder, for nested folders too
-# CROSSOVER: the CrossOver app to use (the launcher also finds CrossOver Preview)
+# This port needs CrossOver on Wine 11.17 with D3DMetal 4.0b3 (CrossOver Preview).
+# CrossOver 26.3 ships Wine 11.0 + D3DMetal 3.0, where azimuth.exe exits without a
+# log, so use Preview when it is installed, whatever the launcher passed in.
 CROSSOVER=${CROSSOVER:-/Applications/CrossOver.app}
+if [ -x "/Applications/CrossOver Preview.app/Contents/SharedSupport/CrossOver/bin/wine" ]; then
+  CROSSOVER="/Applications/CrossOver Preview.app"
+fi
 CX="$CROSSOVER/Contents/SharedSupport/CrossOver"
 WINE="$CX/bin/wine"
 # a bare name is looked up in the default bottle folder; CrossOver also takes a full path
