@@ -548,6 +548,9 @@ static void *list_vt[LIST_SLOTS];
 
 typedef ULONG (STDMETHODCALLTYPE *release_fn)(void *);
 
+static void up_list_reset(void *l); /* present.inc */
+static void up_note_texture(const char *what, const D3D12_RESOURCE_DESC *d, void *res);
+
 static ULONG STDMETHODCALLTYPE hk_list_release(ID3D12GraphicsCommandList *l)
 {
     ULONG r = ((release_fn)list_vt_orig[2])(l);
@@ -569,6 +572,7 @@ static HRESULT STDMETHODCALLTYPE hk_list_reset(ID3D12GraphicsCommandList *l, ID3
         memset(e->root_srv, 0, sizeof(e->root_srv));
     }
     LeaveCriticalSection(&list_cs);
+    up_list_reset(l);
     return ((list_reset_fn)list_vt_orig[10])(l, a, ps);
 }
 
@@ -1335,6 +1339,14 @@ static void STDMETHODCALLTYPE hk_set_pso(ID3D12GraphicsCommandList *l, ID3D12Pip
     ((set_pso_fn)list_vt_orig[25])(l, ps);
 }
 
+/* upscaler hooks, in present.inc */
+static void STDMETHODCALLTYPE hk_rs_viewports(ID3D12GraphicsCommandList *l, UINT n, const D3D12_VIEWPORT *v);
+static void STDMETHODCALLTYPE hk_rs_scissors(ID3D12GraphicsCommandList *l, UINT n, const D3D12_RECT *r);
+static void STDMETHODCALLTYPE hk_om_targets(ID3D12GraphicsCommandList *l, UINT n, const D3D12_CPU_DESCRIPTOR_HANDLE *rt,
+                                            BOOL single, const D3D12_CPU_DESCRIPTOR_HANDLE *ds);
+static void STDMETHODCALLTYPE hk_copy_region(ID3D12GraphicsCommandList *l, const D3D12_TEXTURE_COPY_LOCATION *dst, UINT x, UINT y,
+                                             UINT z, const D3D12_TEXTURE_COPY_LOCATION *src, const D3D12_BOX *box);
+static void STDMETHODCALLTYPE hk_copy_resource(ID3D12GraphicsCommandList *l, ID3D12Resource *dst, ID3D12Resource *src);
 static void hook_list(void *list)
 {
     void ***obj = list;
@@ -1351,6 +1363,11 @@ static void hook_list(void *list)
         list_vt[40] = (void *)hk_set_root_srv;
         list_vt[44] = (void *)hk_set_vb;
         list_vt[66] = (void *)hk_wbi;
+        list_vt[16] = (void *)hk_copy_region;
+        list_vt[17] = (void *)hk_copy_resource;
+        list_vt[21] = (void *)hk_rs_viewports;
+        list_vt[22] = (void *)hk_rs_scissors;
+        list_vt[46] = (void *)hk_om_targets;
     } else if (*obj != list_vt_orig) {
         logmsg("command list %p has an unexpected vtable %p, not hooked", list, *obj);
         return;
@@ -1456,6 +1473,7 @@ static HRESULT STDMETHODCALLTYPE hk_create_committed(ID3D12Device *dev, const D3
     hr = ((create_committed_fn)dev_vt_orig[27])(dev, hp, f, desc, st, cv, riid, ppv);
     slow_end("CreateCommittedResource", t0);
     log_resource("CreateCommittedResource", desc, hr);
+    if (SUCCEEDED(hr) && ppv) up_note_texture("CreateCommittedResource", desc, *ppv);
     if (SUCCEEDED(hr) && ppv) record_buffer(*ppv, desc);
     return hr;
 }
@@ -1483,6 +1501,7 @@ static HRESULT STDMETHODCALLTYPE hk_create_committed1(ID3D12Device *dev, const D
     hr = ((create_committed1_fn)dev_vt_orig[53])(dev, hp, f, desc, st, cv, ps, riid, ppv);
     slow_end("CreateCommittedResource1", t0);
     log_resource("CreateCommittedResource1", desc, hr);
+    if (SUCCEEDED(hr) && ppv) up_note_texture("CreateCommittedResource1", desc, *ppv);
     if (SUCCEEDED(hr) && ppv) record_buffer(*ppv, desc);
     return hr;
 }
@@ -1835,6 +1854,7 @@ static HRESULT STDMETHODCALLTYPE hk_create_placed(ID3D12Device *dev, ID3D12Heap 
     hr = ((create_placed_fn)dev_vt_orig[29])(dev, heap, offset, desc, state, clear, riid, ppv);
     slow_end("CreatePlacedResource", t0);
     log_resource("CreatePlacedResource", desc, hr);
+    if (SUCCEEDED(hr) && ppv) up_note_texture("CreatePlacedResource", desc, *ppv);
 
     if (FAILED(hr) || !ppv || !*ppv) return hr;
     record_buffer(*ppv, desc);
@@ -2260,6 +2280,8 @@ done:
 }
 
 static void hook_device(void *device);
+static void STDMETHODCALLTYPE hk_create_rtv(ID3D12Device *dev, ID3D12Resource *res, const D3D12_RENDER_TARGET_VIEW_DESC *d,
+                                            D3D12_CPU_DESCRIPTOR_HANDLE h);
 
 static HRESULT STDMETHODCALLTYPE hk_device_qi(void *dev, REFIID riid, void **ppv)
 {
@@ -2281,6 +2303,7 @@ static void hook_device(void *device)
         dev_vt[10] = (void *)hk_create_gpso;
         dev_vt[12] = (void *)hk_create_list;
         dev_vt[18] = (void *)hk_create_srv;
+        dev_vt[20] = (void *)hk_create_rtv;
         dev_vt[13] = (void *)hk_check_feature;
         real_check_feature = dev_vt_orig[13];
         dev_vt[41] = (void *)hk_create_signature;
@@ -3143,6 +3166,8 @@ static void hook_vm(int mask, BOOL place)
            place_on ? "on" : "off", (void *)real_nt_alloc, (void *)real_nt_alloc_ex, (void *)real_nt_free);
     CloseHandle(CreateThread(NULL, 0, vm_report_thread, NULL, 0, NULL));
 }
+
+#include "present.inc"
 
 /* ---------------- exports ---------------- */
 
@@ -4678,6 +4703,8 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
         if (!(GetEnvironmentVariableA("FH2_FLUSH", v, sizeof(v)) && v[0] == '0') && GetModuleHandleA("azimuth.exe") &&
             !hook_flush_ntdll() && !hook_flush(GetModuleHandleA("azimuth.exe")))
             logmsg("FlushProcessWriteBuffers: azimuth.exe's import not found, left alone");
+        if (!(GetEnvironmentVariableA("FH2_PRESENT", v, sizeof(v)) && v[0] == '0') && GetModuleHandleA("azimuth.exe"))
+            hook_dxgi(GetModuleHandleA("azimuth.exe"));
     }
     logmsg("fh2port d3d12 proxy loaded, real d3d12 %p", real);
     return real_create_device && real_get_debug_interface && real_serialize_rs;

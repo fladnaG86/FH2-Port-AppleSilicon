@@ -10,8 +10,8 @@ tools: $(OUT)/fh2test.exe $(OUT)/padtest.exe $(OUT)/dxbcdis.exe
 $(OUT):
 	mkdir -p $(OUT)
 
-$(OUT)/d3d12.dll: src/d3d12/d3d12.c src/d3d12/d3d12.def | $(OUT)
-	$(CC) $(CFLAGS) -shared -static-libgcc -o $@ $^ -ldxguid -luuid
+$(OUT)/d3d12.dll: src/d3d12/d3d12.c src/d3d12/d3d12.def src/d3d12/present.inc | $(OUT)
+	$(CC) $(CFLAGS) -shared -static-libgcc -o $@ src/d3d12/d3d12.c src/d3d12/d3d12.def -ldxguid -luuid
 
 $(OUT)/fh2pad.dll: src/gamepad/gamepad.c src/gamepad/gamepad.def | $(OUT)
 	$(CC) $(CFLAGS) -shared -static-libgcc -o $@ $^ -luuid

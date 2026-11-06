@@ -34,6 +34,15 @@ Forza Horizon 3 (1.0.125.0) are playable too**: played here with the same layer 
 
 ### What's new
 
+- **Next release (in main)**: **sharper picture on Retina displays with a spatial upscaler**. Without
+  Wine's Retina mode the window has the display's points (1728x1117 on a 16" MacBook Pro): Azimuth
+  rendered at 1440p, shrank it to 1117p and macOS stretched that 2x. With Retina mode on
+  (`HKCU\Software\Wine\Mac Driver`, `RetinaMode` = `y`; the app does not set it yet) the window has
+  the real pixels, and the layer now hands Azimuth back buffers sized for its render height, then
+  enlarges them to the window with two passes modelled on AMD FSR 1 (EASU edge-adaptive upscale +
+  RCAS sharpening). It turns itself off when the render height is at or above the window's
+  (supersampling). `FH2_UPSCALE=0` turns it off, `FH2_SHARP=<stops>` sets the sharpening (0 = most,
+  default 0.25). Keyboard: driving moved to the arrow keys, W A S D is now the D-pad.
 - **0.1.9**: **Forza Horizon 3 starts and is playable** (1.0.125.0, played on an M1 Max with Azimuth
   1.0.2). FH3 uses Azimuth's private VC14 runtime, which Wine replaced with its builtin DLLs, and
   Azimuth stopped with "Private VC14 runtime was overridden". The install now sets `vcruntime140`,
@@ -204,7 +213,7 @@ Keys count only while the game window has focus; keyboard and controllers work t
   0.1.7, it was Wine's address search (see What's new). Please report it if you still see it, with
   `fh2port.log`.
 - If the picture stops on **"Press RT to accelerate"** in the intro while the music goes on, the
-  game is waiting for RT: check that the controller is on, or click the game window and hold W.
+  game is waiting for RT: check that the controller is on, or click the game window and hold the Up arrow.
 - **MSAA** (anti-aliasing 2x/4x in Azimuth's settings) draws dashes in the sky on D3DMetal: keep
   it off and use a render height above your screen's instead ("supersampled"). Since 0.1.8 it no
   longer stops the game in the car screens. The intro movies play (no intro skip).
@@ -221,7 +230,9 @@ flush fix off / timed without the lock / replaced by a local fence, diagnostic o
 (leave address placement to Wine), `FH2_VMSTATS=12` (every 10 s: virtual memory calls, their cost,
 shapes and callers), `FH2_QUIET=1` (no periodic log lines, control file not polled),
 `FH2_PRIO=<n>` (Windows priority threads are raised to; default 1, `0` leaves them alone),
-`FH2_MSAA8=0` (8x MSAA targets passed to D3DMetal as they are, which stops the car screens).
+`FH2_MSAA8=0` (8x MSAA targets passed to D3DMetal as they are, which stops the car screens),
+`FH2_UPSCALE=0` (no upscaler), `FH2_SHARP=<stops>` (upscaler sharpening), `FH2_PRESENT=0` (dxgi left
+alone: no upscaler and no swap chain log lines).
 Calls into D3DMetal slower than 4 ms are logged as `slow:`. Live commands go through `data/logs/fh2port.ctl` (`top`, `reset`, `dump N`,
 `tint …`, `tintlist`, `tintset …`, `watch …`, `patch on|off`, `stacks` for the Windows-side call
 stack of every thread, useful when the game hangs).
@@ -252,6 +263,15 @@ lo stesso layer su Azimuth 1.0.2.
 
 ### Novità
 
+- **Prossima release (in main)**: **immagine più nitida sugli schermi Retina con un upscaler spaziale**.
+  Senza la Retina mode di Wine la finestra ha i punti dello schermo (1728x1117 su un MacBook Pro 16"):
+  Azimuth renderizzava a 1440p, rimpiccioliva a 1117p e macOS ingrandiva 2x. Con la Retina mode
+  (`HKCU\Software\Wine\Mac Driver`, `RetinaMode` = `y`; l'app non la imposta ancora) la finestra ha
+  i pixel veri, e il layer ora dà ad Azimuth back buffer della sua altezza di rendering e li ingrandisce
+  alla finestra con due passaggi modellati su AMD FSR 1 (EASU, ingrandimento che segue i bordi, +
+  RCAS, nitidezza). Si spegne da solo quando l'altezza di rendering è pari o superiore a quella della
+  finestra (supersampling). `FH2_UPSCALE=0` lo spegne, `FH2_SHARP=<stop>` regola la nitidezza (0 = massima,
+  predefinito 0.25). Tastiera: la guida passa alle frecce, W A S D ora fanno da D-pad.
 - **0.1.9**: **Forza Horizon 3 parte ed è giocabile** (1.0.125.0, giocato su M1 Max con Azimuth 1.0.2).
   FH3 usa il runtime VC14 privato di Azimuth, che Wine sostituiva con le sue DLL builtin, e Azimuth
   si fermava con "Private VC14 runtime was overridden". Ora l'installazione imposta `vcruntime140`,
@@ -415,7 +435,7 @@ insieme. `FH2_KEYBOARD=0` lascia i gamepad di Wine come sono.
   nella 0.1.7, erano la ricerca di indirizzi di Wine (vedi Novità). Se li vedi ancora segnalalo con
   `fh2port.log`.
 - Se nell'intro l'immagine si ferma su **"Premi RT per accelerare"** mentre la musica continua, il
-  gioco aspetta RT: controlla che il controller sia acceso, oppure clicca la finestra del gioco e tieni premuto W.
+  gioco aspetta RT: controlla che il controller sia acceso, oppure clicca la finestra del gioco e tieni premuto Freccia su.
 - **MSAA** (anti-aliasing 2x/4x nelle impostazioni di Azimuth): su D3DMetal disegna trattini nel
   cielo. Tienilo spento e usa invece un'altezza di rendering superiore a quella dello schermo
   ("supersampled"). Dalla 0.1.8 non ferma più il gioco nelle schermate auto. I filmati iniziali
