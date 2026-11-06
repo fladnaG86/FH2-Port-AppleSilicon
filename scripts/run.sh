@@ -11,7 +11,10 @@ CROSSOVER=${CROSSOVER:-/Applications/CrossOver.app}
 CX="$CROSSOVER/Contents/SharedSupport/CrossOver"
 # a bare name is looked up in the default bottle folder; CrossOver also takes a full path
 [[ $BOTTLE == /* ]] || BOTTLE="$HOME/Library/Application Support/CrossOver/Bottles/$BOTTLE"
-export CX_BOTTLE=$BOTTLE CX_GRAPHICS_BACKEND=d3dmetal ROSETTA_ADVERTISE_AVX=1
+# Rosetta before macOS 27 aborts on a page fault inside an AVX instruction: advertise AVX on 27+ only
+avx=0
+(( $(sw_vers -productVersion | cut -d. -f1) >= 27 )) && avx=1
+export CX_BOTTLE=$BOTTLE CX_GRAPHICS_BACKEND=d3dmetal ROSETTA_ADVERTISE_AVX=${ROSETTA_ADVERTISE_AVX:-$avx}
 A="$BOTTLE/drive_c/$AZDIR"
 cd "$A" || { echo "no wrapper folder at $A" >&2; exit 1; }
 mkdir -p data/logs
