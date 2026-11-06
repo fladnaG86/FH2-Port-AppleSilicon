@@ -4777,7 +4777,9 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
         if (!(GetEnvironmentVariableA("FH2_FLUSH", v, sizeof(v)) && v[0] == '0') && GetModuleHandleA("azimuth.exe") &&
             !hook_flush_ntdll() && !hook_flush(GetModuleHandleA("azimuth.exe")))
             logmsg("FlushProcessWriteBuffers: azimuth.exe's import not found, left alone");
-        if (!(GetEnvironmentVariableA("FH2_PRESENT", v, sizeof(v)) && v[0] == '0') && GetModuleHandleA("azimuth.exe"))
+        /* the upscaler needs the device and command list hooks (viewport scaling): not in minimal mode */
+        if (minimal) logmsg("present: minimal mode, dxgi left alone (no upscaler)");
+        else if (!(GetEnvironmentVariableA("FH2_PRESENT", v, sizeof(v)) && v[0] == '0') && GetModuleHandleA("azimuth.exe"))
             hook_dxgi(GetModuleHandleA("azimuth.exe"));
     }
     logmsg("fh2port d3d12 proxy loaded, real d3d12 %p", real);
