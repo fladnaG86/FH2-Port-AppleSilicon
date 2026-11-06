@@ -233,7 +233,11 @@ shapes and callers), `FH2_QUIET=1` (no periodic log lines, control file not poll
 `FH2_PRIO=<n>` (Windows priority threads are raised to; default 1, `0` leaves them alone),
 `FH2_MSAA8=0` (8x MSAA targets passed to D3DMetal as they are, which stops the car screens),
 `FH2_UPSCALE=0` (no upscaler), `FH2_SHARP=<stops>` (upscaler sharpening), `FH2_PRESENT=0` (dxgi left
-alone: no upscaler and no swap chain log lines).
+alone: no upscaler and no swap chain log lines), `FH2_MIN=1` (minimal mode: no D3D12 interception
+and no upscaler, the layer only does the fiber fix and the Wine-level fixes; for a complete D3D12
+implementation under it, such as vkd3d-proton, whose D3DMetal workarounds do not apply),
+`FH2_FENCE_WAIT=<ms>` (bounded wait for the GPU fence in the signal worker, `0` = no wait,
+diagnostic) and `FH2_FENCE_TRACE=1` (fence steps logged, plus every 5 s where each queue's worker is).
 Calls into D3DMetal slower than 4 ms are logged as `slow:`. Live commands go through `data/logs/fh2port.ctl` (`top`, `reset`, `dump N`,
 `tint …`, `tintlist`, `tintset …`, `watch …`, `patch on|off`, `stacks` for the Windows-side call
 stack of every thread, useful when the game hangs).
