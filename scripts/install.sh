@@ -11,6 +11,8 @@
 #     d3dcompiler_47 and the VC++ 2012 and VC14 runtimes native)
 #   - registers fh2pad.dll as the provider of Windows.Gaming.Input.Gamepad
 #   - WineBus DisableHidraw=1, so a DualSense is seen as a gamepad
+#   - Wine's Retina mode for the bottle, so the window has the display's real
+#     pixels and the layer's upscaler can use them (FH2_RETINA=0 leaves it alone)
 #   - with --settings: antialiasing=off, resolution=1440 in data/azimuth.ini
 #     (the user settings file, backed up first)
 #   FH2_BUILD  folder with the two DLLs (default: build/ next to this script)
@@ -31,6 +33,7 @@ A="$DRIVE/$AZDIR"
 APPKEY='HKCU\Software\Wine\AppDefaults\azimuth.exe\DllOverrides'
 PADKEY='HKLM\Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Gaming.Input.Gamepad'
 BUSKEY='HKLM\System\CurrentControlSet\Services\WineBus'
+MACKEY='HKCU\Software\Wine\Mac Driver'
 # SHA-256 of the supported wrapper release (0.9.10), to warn about other versions
 KNOWN_SHA=${KNOWN_SHA:-}
 
@@ -40,6 +43,7 @@ reg() { CX_BOTTLE=$BOTTLE "$WINE" reg "$@" >/dev/null 2>&1; }
 
 if [ "${1:-}" = --uninstall ]; then
   reg delete "$APPKEY" /f || true
+  reg delete "$MACKEY" /v RetinaMode /f || true
   reg add "$PADKEY" /v DllPath /t REG_SZ /d 'C:\windows\system32\windows.gaming.input.dll' /f
   rm -f "$A/d3d12.dll" "$A/fh2pad.dll"
   echo "removed the layer from $A"
@@ -67,6 +71,10 @@ for dll in vcruntime140 vcruntime140_1 msvcp140 concrt140; do
 done
 reg add "$PADKEY" /v DllPath /t REG_SZ /d "C:\\$WINDIR\\fh2pad.dll" /f
 reg add "$BUSKEY" /v DisableHidraw /t REG_DWORD /d 1 /f
+if [ "${FH2_RETINA:-1}" != 0 ]; then
+  reg add "$MACKEY" /v RetinaMode /t REG_SZ /d y /f
+  echo "Retina mode on for the bottle"
+fi
 echo "layer installed in $A"
 
 [ -f "$A/d3dcompiler_47.dll" ] || echo "note: put Microsoft's d3dcompiler_47.dll in $A (see README)" >&2

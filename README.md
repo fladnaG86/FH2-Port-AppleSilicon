@@ -34,15 +34,16 @@ Forza Horizon 3 (1.0.125.0) are playable too**: played here with the same layer 
 
 ### What's new
 
-- **Next release (in main)**: **sharper picture on Retina displays with a spatial upscaler**. Without
-  Wine's Retina mode the window has the display's points (1728x1117 on a 16" MacBook Pro): Azimuth
-  rendered at 1440p, shrank it to 1117p and macOS stretched that 2x. With Retina mode on
-  (`HKCU\Software\Wine\Mac Driver`, `RetinaMode` = `y`; the app does not set it yet) the window has
-  the real pixels, and the layer now hands Azimuth back buffers sized for its render height, then
-  enlarges them to the window with two passes modelled on AMD FSR 1 (EASU edge-adaptive upscale +
-  RCAS sharpening). It turns itself off when the render height is at or above the window's
-  (supersampling). `FH2_UPSCALE=0` turns it off, `FH2_SHARP=<stops>` sets the sharpening (0 = most,
-  default 0.25). Keyboard: driving moved to the arrow keys, W A S D is now the D-pad.
+- **0.1.10**: **sharper picture on Retina displays with a spatial upscaler** (played on an M1 Max
+  with Azimuth 1.0.4). Without Wine's Retina mode the window has the display's points (1728x1117 on
+  a 16" MacBook Pro): Azimuth rendered at 1440p, shrank it to 1117p and macOS stretched that 2x.
+  With Retina mode on (`HKCU\Software\Wine\Mac Driver`, `RetinaMode` = `y`, now set by the install
+  for the whole bottle; `FH2_RETINA=0` leaves it alone) the window has the real pixels, and the
+  layer now hands Azimuth back buffers sized for its render height, then enlarges them to the window
+  with two passes modelled on AMD FSR 1 (EASU edge-adaptive upscale + RCAS sharpening). It turns
+  itself off when the render height is at or above the window's (supersampling). `FH2_UPSCALE=0`
+  turns it off, `FH2_SHARP=<stops>` sets the sharpening (0 = most, default 0.25). Keyboard: driving
+  moved to the arrow keys, W A S D is now the D-pad.
 - **0.1.9**: **Forza Horizon 3 starts and is playable** (1.0.125.0, played on an M1 Max with Azimuth
   1.0.2). FH3 uses Azimuth's private VC14 runtime, which Wine replaced with its builtin DLLs, and
   Azimuth stopped with "Private VC14 runtime was overridden". The install now sets `vcruntime140`,
@@ -263,15 +264,17 @@ lo stesso layer su Azimuth 1.0.2.
 
 ### Novità
 
-- **Prossima release (in main)**: **immagine più nitida sugli schermi Retina con un upscaler spaziale**.
-  Senza la Retina mode di Wine la finestra ha i punti dello schermo (1728x1117 su un MacBook Pro 16"):
-  Azimuth renderizzava a 1440p, rimpiccioliva a 1117p e macOS ingrandiva 2x. Con la Retina mode
-  (`HKCU\Software\Wine\Mac Driver`, `RetinaMode` = `y`; l'app non la imposta ancora) la finestra ha
-  i pixel veri, e il layer ora dà ad Azimuth back buffer della sua altezza di rendering e li ingrandisce
-  alla finestra con due passaggi modellati su AMD FSR 1 (EASU, ingrandimento che segue i bordi, +
-  RCAS, nitidezza). Si spegne da solo quando l'altezza di rendering è pari o superiore a quella della
-  finestra (supersampling). `FH2_UPSCALE=0` lo spegne, `FH2_SHARP=<stop>` regola la nitidezza (0 = massima,
-  predefinito 0.25). Tastiera: la guida passa alle frecce, W A S D ora fanno da D-pad.
+- **0.1.10**: **immagine più nitida sugli schermi Retina con un upscaler spaziale** (giocato su M1
+  Max con Azimuth 1.0.4). Senza la Retina mode di Wine la finestra ha i punti dello schermo
+  (1728x1117 su un MacBook Pro 16"): Azimuth renderizzava a 1440p, rimpiccioliva a 1117p e macOS
+  ingrandiva 2x. Con la Retina mode (`HKCU\Software\Wine\Mac Driver`, `RetinaMode` = `y`, ora
+  impostata dall'installazione per tutta la bottle; `FH2_RETINA=0` la lascia com'è) la finestra ha i
+  pixel veri, e il layer ora dà ad Azimuth back buffer della sua altezza di rendering e li
+  ingrandisce alla finestra con due passaggi modellati su AMD FSR 1 (EASU, ingrandimento che segue i
+  bordi, + RCAS, nitidezza). Si spegne da solo quando l'altezza di rendering è pari o superiore a
+  quella della finestra (supersampling). `FH2_UPSCALE=0` lo spegne, `FH2_SHARP=<stop>` regola la
+  nitidezza (0 = massima, predefinito 0.25). Tastiera: la guida passa alle frecce, W A S D ora fanno
+  da D-pad.
 - **0.1.9**: **Forza Horizon 3 parte ed è giocabile** (1.0.125.0, giocato su M1 Max con Azimuth 1.0.2).
   FH3 usa il runtime VC14 privato di Azimuth, che Wine sostituiva con le sue DLL builtin, e Azimuth
   si fermava con "Private VC14 runtime was overridden". Ora l'installazione imposta `vcruntime140`,
