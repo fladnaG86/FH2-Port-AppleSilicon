@@ -18,7 +18,7 @@ in races (Metal HUD, top right). [Watch the video](https://github.com/fladnaG86/
 
 ## English
 
-This project lets **Azimuth 1.0.2**, Almost There Games' compatibility wrapper for the Xbox One
+This project lets **Azimuth 1.0.4**, Almost There Games' compatibility wrapper for the Xbox One
 version of **Forza Horizon 2 (1.0.0.64)**, run on Apple Silicon Macs through **CrossOver** and
 Apple's **Game Porting Toolkit (D3DMetal)**. Azimuth itself targets Windows and Linux; this repo
 only adds layers *underneath* it, the way DXVK or vkd3d sit under a game:
@@ -27,10 +27,12 @@ only adds layers *underneath* it, the way DXVK or vkd3d sit under a game:
 - **`fh2pad.dll`**: the bottle's provider of `Windows.Gaming.Input.Gamepad`, adding a keyboard.
 - **FH2 Port.app**: a launcher that installs both into a CrossOver bottle and starts the game.
 
-Developed and tested on a MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver on Wine 11 with
-GPTK 4.0b3 and Azimuth 1.0.2 (0.9.10 starts with this layer too, but 0.1.7 was played on 1.0.2 only).
-Free roam, races, menus, audio, controllers and keyboard work. **Forza Motorsport 6 (1.0.0.44) and
-Forza Horizon 3 (1.0.125.0) are playable too**: played here with the same layer on Azimuth 1.0.2.
+Developed and tested on a MacBook Pro M1 Max (32 GB), macOS 27.3, CrossOver on Wine 11 with
+GPTK 4.0b3 and Azimuth 1.0.4 (1.0.2 and 0.9.10 start with this layer too). Free roam, races, menus,
+audio, controllers and keyboard work. **Forza Horizon 3 (1.0.125.0) is playable too** (played here on
+Azimuth 1.0.4), and so is **Forza Motorsport 6 (1.0.0.44)** (played on 1.0.2, not yet retried on
+1.0.4). Azimuth 1.0.4 fixes Forza Horizon 2's brightness at render heights other than 1080p, so
+updating is recommended (see below).
 
 ### What's new
 
@@ -257,7 +259,7 @@ stack of every thread, useful when the game hangs).
 
 ## Italiano
 
-Questo progetto fa girare **Azimuth 1.0.2**, il wrapper di compatibilità di Almost There Games per
+Questo progetto fa girare **Azimuth 1.0.4**, il wrapper di compatibilità di Almost There Games per
 la versione Xbox One di **Forza Horizon 2 (1.0.0.64)**, sui Mac Apple Silicon tramite **CrossOver**
 e **Game Porting Toolkit (D3DMetal)** di Apple. Azimuth è pensato per Windows e Linux; questo repo
 aggiunge solo dei layer *sotto* di lui, come fanno DXVK o vkd3d sotto un gioco:
@@ -266,12 +268,13 @@ aggiunge solo dei layer *sotto* di lui, come fanno DXVK o vkd3d sotto un gioco:
 - **`fh2pad.dll`**: il provider di `Windows.Gaming.Input.Gamepad` della bottle, con la tastiera.
 - **FH2 Port.app**: un launcher che installa entrambi in una bottle di CrossOver e avvia il gioco.
 
-Sviluppato e provato su MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver su Wine 11 con GPTK
-4.0b3 e Azimuth 1.0.2 (anche la 0.9.10 parte con questo layer, ma la 0.1.7 è stata giocata solo sulla
-1.0.2). Mondo aperto, gare, menu, audio, controller e tastiera funzionano; con Azimuth a 60 fps e
+Sviluppato e provato su MacBook Pro M1 Max (32 GB), macOS 27.3, CrossOver su Wine 11 con GPTK
+4.0b3 e Azimuth 1.0.4 (anche la 1.0.2 e la 0.9.10 partono con questo layer). Mondo aperto, gare, menu, audio, controller e tastiera funzionano; con Azimuth a 60 fps e
 1440 righe il gioco sta intorno ai 60 fps ([video](https://github.com/fladnaG86/FH2-Port-AppleSilicon/releases/tag/video)).
-**Anche Forza Motorsport 6 (1.0.0.44) e Forza Horizon 3 (1.0.125.0) sono giocabili**: giocati qui con
-lo stesso layer su Azimuth 1.0.2.
+**Anche Forza Horizon 3 (1.0.125.0) è giocabile** (giocato qui su Azimuth 1.0.4), e così **Forza
+Motorsport 6 (1.0.0.44)** (giocato sulla 1.0.2, non ancora riprovato sulla 1.0.4). Azimuth 1.0.4
+corregge la luminosità di Forza Horizon 2 alle altezze di rendering diverse da 1080p, quindi conviene
+aggiornare (vedi sotto).
 
 ### Novità
 

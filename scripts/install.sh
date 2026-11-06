@@ -34,7 +34,7 @@ APPKEY='HKCU\Software\Wine\AppDefaults\azimuth.exe\DllOverrides'
 PADKEY='HKLM\Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Gaming.Input.Gamepad'
 BUSKEY='HKLM\System\CurrentControlSet\Services\WineBus'
 MACKEY='HKCU\Software\Wine\Mac Driver'
-# SHA-256 of the supported wrapper release (0.9.10), to warn about other versions
+# optional SHA-256 of a wrapper release, to warn about other versions (tested: 1.0.4)
 KNOWN_SHA=${KNOWN_SHA:-}
 
 reg() { CX_BOTTLE=$BOTTLE "$WINE" reg "$@" >/dev/null 2>&1; }
