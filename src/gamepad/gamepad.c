@@ -99,7 +99,7 @@ static const struct { int vk; UINT32 button; } key_buttons[] = {
     {VK_RETURN, BTN_A}, {VK_SPACE, BTN_A}, {VK_ESCAPE, BTN_B}, {VK_BACK, BTN_B},
     {'F', BTN_X}, {'R', BTN_Y}, {VK_TAB, BTN_MENU}, {'C', BTN_VIEW},
     {'Q', BTN_LB}, {'E', BTN_RB}, {'H', BTN_LS}, {'V', BTN_RS},
-    {VK_UP, BTN_UP}, {VK_DOWN, BTN_DOWN}, {VK_LEFT, BTN_LEFT}, {VK_RIGHT, BTN_RIGHT},
+    {'W', BTN_UP}, {'S', BTN_DOWN}, {'A', BTN_LEFT}, {'D', BTN_RIGHT},
 };
 
 static BOOL key_down(int vk)
@@ -239,9 +239,9 @@ static HRESULT STDMETHODCALLTYPE vpad_reading(void *This, pad_reading *out)
     if (game_focused()) {
         for (size_t i = 0; i < sizeof(key_buttons) / sizeof(key_buttons[0]); i++)
             if (key_down(key_buttons[i].vk)) kbuttons |= key_buttons[i].button;
-        throttle = key_down('W');
-        brake = key_down('S');
-        steer_target = (key_down('D') ? 1 : 0) - (key_down('A') ? 1 : 0);
+        throttle = key_down(VK_UP);
+        brake = key_down(VK_DOWN);
+        steer_target = (key_down(VK_RIGHT) ? 1 : 0) - (key_down(VK_LEFT) ? 1 : 0);
         krx = (key_down('L') ? 1 : 0) - (key_down('J') ? 1 : 0);
         kry = (key_down('I') ? 1 : 0) - (key_down('K') ? 1 : 0);
     }

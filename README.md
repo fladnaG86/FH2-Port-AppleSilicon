@@ -178,8 +178,8 @@ builds the app and the DMG.
 
 | Key | Pad |
 |---|---|
-| W / S | throttle (RT) / brake (LT) |
-| A / D | steering (eased: full lock in ~150 ms, back to centre in ~80 ms) |
+| Up / Down arrows | throttle (RT) / brake (LT) |
+| Left / Right arrows | steering (eased: full lock in ~150 ms, back to centre in ~80 ms) |
 | I J K L | right stick (look around) |
 | Enter / Space | A |
 | Esc / Backspace | B |
@@ -187,7 +187,7 @@ builds the app and the DMG.
 | Tab / C | Menu / View |
 | Q / E | LB / RB |
 | H / V | left / right stick click |
-| Arrows | D-pad |
+| W A S D | D-pad |
 
 Keys count only while the game window has focus; keyboard and controllers work together.
 `FH2_KEYBOARD=0` hands out Wine's gamepads unchanged.
@@ -388,8 +388,8 @@ costruisce app e DMG.
 
 | Tasto | Pad |
 |---|---|
-| W / S | acceleratore (RT) / freno (LT) |
-| A / D | sterzo (graduale: fine corsa in ~150 ms, ritorno al centro in ~80 ms) |
+| Freccia su / giù | acceleratore (RT) / freno (LT) |
+| Freccia sinistra / destra | sterzo (graduale: fine corsa in ~150 ms, ritorno al centro in ~80 ms) |
 | I J K L | stick destro (guardarsi intorno) |
 | Invio / Spazio | A |
 | Esc / Backspace | B |
@@ -397,7 +397,7 @@ costruisce app e DMG.
 | Tab / C | Menu / View |
 | Q / E | LB / RB |
 | H / V | click stick sinistro / destro |
-| Frecce | D-pad |
+| W A S D | D-pad |
 
 I tasti contano solo quando la finestra del gioco ha il focus; tastiera e controller funzionano
 insieme. `FH2_KEYBOARD=0` lascia i gamepad di Wine come sono.
