@@ -340,8 +340,8 @@ static DWORD WINAPI signal_worker(void *arg)
                                (unsigned long long)j->gpu_value, (long)fence_wait_ms, (void *)j->fence,
                                (unsigned long long)j->value);
                 }
-                qs->state = 0;
             }
+            qs->state = 0;
         }
         if (fence_trace) logmsg("fence: releasing the game's fence %p=%llu", (void *)j->fence,
                                 (unsigned long long)j->value);
