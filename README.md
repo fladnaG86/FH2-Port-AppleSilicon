@@ -34,6 +34,13 @@ Forza Horizon 3 (1.0.125.0) are playable too**: played here with the same layer 
 
 ### What's new
 
+- **0.1.11**: **Forza Horizon 3 no longer stops after about a minute on macOS 26** (PR #22 by
+  @FraSharp). Rosetta before macOS 27 aborts the process when an AVX instruction takes a page fault
+  ("unexpectedly need to EmulateForward on a synchronous exception"); the launch now advertises AVX
+  to Rosetta on macOS 27 and later only, and `ROSETTA_ADVERTISE_AVX` set in the environment still
+  wins. New switches: `FH2_MIN=1` minimal mode for a complete D3D12 implementation such as
+  vkd3d-proton (PR #19 by @ssaltarenn), `FH2_FENCE_WAIT` / `FH2_FENCE_TRACE` fence diagnostics (PR
+  #18 by @ssaltarenn). Nothing changes on macOS 27 with the default settings.
 - **0.1.10**: **sharper picture on Retina displays with a spatial upscaler** (played on an M1 Max
   with Azimuth 1.0.4). Without Wine's Retina mode the window has the display's points (1728x1117 on
   a 16" MacBook Pro): Azimuth rendered at 1440p, shrank it to 1117p and macOS stretched that 2x.
@@ -268,6 +275,13 @@ lo stesso layer su Azimuth 1.0.2.
 
 ### Novità
 
+- **0.1.11**: **Forza Horizon 3 non si ferma più dopo circa un minuto su macOS 26** (PR #22 di
+  @FraSharp). Rosetta prima di macOS 27 chiude il processo quando un'istruzione AVX prende un page
+  fault ("unexpectedly need to EmulateForward on a synchronous exception"); ora l'avvio dichiara
+  l'AVX a Rosetta solo da macOS 27 in poi, e `ROSETTA_ADVERTISE_AVX` impostata nell'ambiente vale
+  ancora. Nuove opzioni: `FH2_MIN=1` modalità minima per un'implementazione D3D12 completa come
+  vkd3d-proton (PR #19 di @ssaltarenn), diagnostica delle fence `FH2_FENCE_WAIT` / `FH2_FENCE_TRACE`
+  (PR #18 di @ssaltarenn). Su macOS 27 con le impostazioni predefinite non cambia nulla.
 - **0.1.10**: **immagine più nitida sugli schermi Retina con un upscaler spaziale** (giocato su M1
   Max con Azimuth 1.0.4). Senza la Retina mode di Wine la finestra ha i punti dello schermo
   (1728x1117 su un MacBook Pro 16"): Azimuth renderizzava a 1440p, rimpiccioliva a 1117p e macOS
